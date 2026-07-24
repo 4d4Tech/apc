@@ -60,9 +60,14 @@ export default function OperatorDashboard() {
         </div>
       </div>
 
-      <button className="btn btn-primary mb-4" onClick={() => navigate('/operator/new-batch')} style={{ width: '100%' }}>
-        + New Batch Submission
-      </button>
+      <div className="flex gap-4 mb-4">
+        <button className="btn btn-primary" onClick={() => navigate('/operator/new-batch')} style={{ flex: 1 }}>
+          + New Batch Submission
+        </button>
+        <button className="btn btn-secondary" onClick={() => alert('Tax documents will be generated and available here at year end.')} style={{ flex: 1 }}>
+          Tax Documents (1099)
+        </button>
+      </div>
 
       <h3>Recent Batches</h3>
       {loading ? (

@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, getDocs, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, doc, updateDoc, getDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, auth, functions } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
+import { generatePaystubPDF } from '../utils/pdfGenerator';
 
 export default function AdminDashboard() {
   const [batches, setBatches] = useState([]);
+  const [operators, setOperators] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedBatch, setSelectedBatch] = useState(null);
   const [txDetails, setTxDetails] = useState([]);
@@ -14,11 +16,42 @@ export default function AdminDashboard() {
   const [newOpData, setNewOpData] = useState({ firstName: '', lastName: '', phone: '', email: '', password: '' });
   const [isAddingOp, setIsAddingOp] = useState(false);
   const [addOpError, setAddOpError] = useState('');
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [showPayrollModal, setShowPayrollModal] = useState(false);
+  const [payrollSummary, setPayrollSummary] = useState([]);
+  const [isProcessingPayroll, setIsProcessingPayroll] = useState(false);
+  const [adjType, setAdjType] = useState('deduction');
+  const [adjDesc, setAdjDesc] = useState('');
+  const [adjAmount, setAdjAmount] = useState('');
+  
+  const [isGenerating1099, setIsGenerating1099] = useState(false);
+  const [show1099Modal, setShow1099Modal] = useState(false);
+  const [year1099, setYear1099] = useState(new Date().getFullYear());
+  const [taxResults, setTaxResults] = useState(null);
+  const [isDownloadingPaystub, setIsDownloadingPaystub] = useState(false);
+  const [paystubPdfData, setPaystubPdfData] = useState(null);
+
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchBatches();
+    fetchOperators();
   }, []);
+
+  const fetchOperators = async () => {
+    try {
+      const q = query(collection(db, 'users'), where('role', '==', 'operator'));
+      const snap = await getDocs(q);
+      const opsMap = {};
+      snap.docs.forEach(d => {
+        const data = d.data();
+        opsMap[d.id] = `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Unknown Operator';
+      });
+      setOperators(opsMap);
+    } catch (err) {
+      console.error("Error fetching operators:", err);
+    }
+  };
 
   const fetchBatches = async () => {
     setLoading(true);
@@ -48,16 +81,60 @@ export default function AdminDashboard() {
   const handleCloseModal = () => {
       setSelectedBatch(null);
       setTxDetails([]);
+      setReviewNotes('');
   };
 
-  const updateBatchStatus = async (batchId, status) => {
+  const updateBatchStatus = async (batchId, status, notes = '') => {
     try {
-      await updateDoc(doc(db, 'batches', batchId), { status });
+      await updateDoc(doc(db, 'batches', batchId), { status, reviewNotes: notes });
       fetchBatches();
-      if (selectedBatch?.id === batchId) setSelectedBatch({...selectedBatch, status});
+      if (selectedBatch?.id === batchId) {
+          if (status === 'verified' || status === 'rejected') {
+              handleCloseModal();
+          } else {
+              setSelectedBatch({...selectedBatch, status, reviewNotes: notes});
+          }
+      }
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleAddAdjustment = async (e) => {
+      e.preventDefault();
+      if (!selectedBatch) return;
+      const newAdj = {
+          type: adjType,
+          description: adjDesc,
+          amount: Number(adjAmount),
+          createdAt: new Date().toISOString()
+      };
+      
+      const updatedAdjustments = [...(selectedBatch.adjustments || []), newAdj];
+      
+      try {
+          await updateDoc(doc(db, 'batches', selectedBatch.id), { adjustments: updatedAdjustments });
+          setSelectedBatch({...selectedBatch, adjustments: updatedAdjustments});
+          setAdjDesc('');
+          setAdjAmount('');
+          fetchBatches();
+      } catch (err) {
+          console.error("Error adding adjustment:", err);
+      }
+  };
+
+  const handleRemoveAdjustment = async (index) => {
+      if (!selectedBatch) return;
+      const updatedAdjustments = [...(selectedBatch.adjustments || [])];
+      updatedAdjustments.splice(index, 1);
+      
+      try {
+          await updateDoc(doc(db, 'batches', selectedBatch.id), { adjustments: updatedAdjustments });
+          setSelectedBatch({...selectedBatch, adjustments: updatedAdjustments});
+          fetchBatches();
+      } catch (err) {
+          console.error("Error removing adjustment:", err);
+      }
   };
 
   const handleAddOperator = async (e) => {
@@ -83,11 +160,82 @@ export default function AdminDashboard() {
     navigate('/login');
   };
 
+  const handleOpenPayroll = () => {
+      const verified = batches.filter(b => b.status === 'verified');
+      const grouped = {};
+      verified.forEach(b => {
+          if (!grouped[b.operatorId]) {
+              grouped[b.operatorId] = { operatorId: b.operatorId, batchIds: [], total: 0 };
+          }
+          grouped[b.operatorId].batchIds.push(b.id);
+          grouped[b.operatorId].total += (b.calculatedPay || 0);
+      });
+      setPayrollSummary(Object.values(grouped));
+      setShowPayrollModal(true);
+  };
+
+  const handleRunPayroll = async () => {
+      setIsProcessingPayroll(true);
+      try {
+          const runPayrollFn = httpsCallable(functions, 'runPayroll');
+          for (const op of payrollSummary) {
+              for (const batchId of op.batchIds) {
+                  await runPayrollFn({ batchId });
+              }
+          }
+          setShowPayrollModal(false);
+          fetchBatches();
+          alert("Payroll processing initiated!");
+      } catch (err) {
+          console.error(err);
+          alert("Error running payroll: " + err.message);
+      } finally {
+          setIsProcessingPayroll(false);
+      }
+  };
+
+  const handleGenerate1099 = async (e) => {
+      e.preventDefault();
+      setIsGenerating1099(true);
+      setTaxResults(null);
+      try {
+          const gen1099Fn = httpsCallable(functions, 'generate1099');
+          const res = await gen1099Fn({ year: year1099 });
+          setTaxResults(res.data.data);
+      } catch (err) {
+          console.error(err);
+          alert("Error generating 1099s: " + err.message);
+      } finally {
+          setIsGenerating1099(false);
+      }
+  };
+
+  const handleDownloadPaystub = async (batchId) => {
+      setIsDownloadingPaystub(true);
+      try {
+          const genPaystubFn = httpsCallable(functions, 'generatepaystub');
+          const res = await genPaystubFn({ batchId });
+          if (res.data.success) {
+              const pdfData = generatePaystubPDF(res.data.data);
+              setPaystubPdfData(pdfData);
+          } else {
+              alert("Failed to fetch paystub data.");
+          }
+      } catch (err) {
+          console.error(err);
+          alert("Error generating paystub: " + err.message);
+      } finally {
+          setIsDownloadingPaystub(false);
+      }
+  };
+
   return (
     <div className="container mt-8">
       <div className="flex justify-between items-center mb-4">
         <h2>Admin Dashboard</h2>
         <div className="flex gap-2">
+            <button className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleOpenPayroll}>Run Payroll</button>
+            <button className="btn btn-secondary" onClick={() => setShow1099Modal(true)}>Year-End Tax (1099)</button>
             <button className="btn btn-primary" onClick={() => setShowAddOpModal(true)}>Add Operator</button>
             <button className="btn btn-secondary" onClick={() => navigate('/admin/rates')}>Operator Rates</button>
             <button className="btn btn-secondary" onClick={handleLogout}>Logout</button>
@@ -101,7 +249,7 @@ export default function AdminDashboard() {
                {batches.filter(b => b.status === 'pending').map(batch => (
                   <div key={batch.id} className="flex justify-between items-center" style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--glass-border)'}}>
                       <div>
-                          <div style={{ fontWeight: 600 }}>Operator: {batch.operatorId}</div>
+                          <div style={{ fontWeight: 600 }}>Operator: {operators[batch.operatorId] || batch.operatorId}</div>
                           <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
                               {batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'} - {batch.expectedItemCount} boots
                           </div>
@@ -118,13 +266,13 @@ export default function AdminDashboard() {
       </div>
 
       <div className="glass-card mt-8">
-        <h3>Approved Batches (Ready for Payroll)</h3>
+        <h3>Verified Batches (Ready for Payroll)</h3>
         {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
             <div className="flex flex-col gap-2 mt-4">
-               {batches.filter(b => b.status === 'approved').map(batch => (
+               {batches.filter(b => b.status === 'verified').map(batch => (
                   <div key={batch.id} className="flex justify-between items-center" style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--glass-border)'}}>
                       <div>
-                          <div style={{ fontWeight: 600 }}>Operator: {batch.operatorId}</div>
+                          <div style={{ fontWeight: 600 }}>Operator: {operators[batch.operatorId] || batch.operatorId}</div>
                           <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
                               {batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'}
                           </div>
@@ -137,7 +285,35 @@ export default function AdminDashboard() {
                       </div>
                   </div>
                ))}
-               {batches.filter(b => b.status === 'approved').length === 0 && <p>No approved batches.</p>}
+               {batches.filter(b => b.status === 'verified').length === 0 && <p>No verified batches.</p>}
+            </div>
+        )}
+      </div>
+
+      <div className="glass-card mt-8">
+        <h3>Batch History (Paid / Rejected)</h3>
+        {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
+            <div className="flex flex-col gap-2 mt-4">
+               {batches.filter(b => b.status === 'paid' || b.status === 'rejected').map(batch => (
+                  <div key={batch.id} className="flex justify-between items-center" style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--glass-border)'}}>
+                      <div>
+                          <div style={{ fontWeight: 600 }}>Operator: {operators[batch.operatorId] || batch.operatorId}</div>
+                          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
+                              {batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'} - Status: <span style={{textTransform: 'capitalize', color: batch.status === 'rejected' ? 'var(--status-error)' : 'var(--status-paid)'}}>{batch.status}</span>
+                          </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                          <div style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</div>
+                          {batch.status === 'paid' && (
+                              <button className="btn btn-secondary" disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)}>
+                                  {isDownloadingPaystub ? '...' : 'PDF Stub'}
+                              </button>
+                          )}
+                          <button className="btn btn-secondary" onClick={() => handleViewDocs(batch)}>View Docs</button>
+                      </div>
+                  </div>
+               ))}
+               {batches.filter(b => b.status === 'paid' || b.status === 'rejected').length === 0 && <p>No past batches.</p>}
             </div>
         )}
       </div>
@@ -169,16 +345,60 @@ export default function AdminDashboard() {
                                   </div>
                               </div>
                           ))}
+                          
+                          <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                              <h4 className="mb-2">Adjustments (Deductions/Reimbursements)</h4>
+                              {selectedBatch.adjustments?.map((adj, idx) => (
+                                  <div key={idx} className="flex justify-between items-center mb-2" style={{ padding: '0.5rem', border: '1px solid var(--glass-border)', borderRadius: '0.25rem' }}>
+                                      <div>
+                                          <span style={{color: adj.type === 'deduction' ? 'var(--status-error)' : 'var(--status-paid)', fontWeight: 600, marginRight: '0.5rem'}}>{adj.type === 'deduction' ? '-' : '+'}</span>
+                                          {adj.description}
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                          <span>${adj.amount.toFixed(2)}</span>
+                                          {(selectedBatch.status === 'pending' || selectedBatch.status === 'verified') && (
+                                              <button onClick={() => handleRemoveAdjustment(idx)} style={{color: 'var(--status-error)', cursor: 'pointer', background:'none', border:'none'}}>X</button>
+                                          )}
+                                      </div>
+                                  </div>
+                              ))}
+                              
+                              {(selectedBatch.status === 'pending' || selectedBatch.status === 'verified') && (
+                                  <form onSubmit={handleAddAdjustment} className="flex gap-2 mt-2">
+                                      <select className="form-input" style={{width: 'auto', padding: '0.5rem'}} value={adjType} onChange={e => setAdjType(e.target.value)}>
+                                          <option value="deduction">Deduct</option>
+                                          <option value="reimbursement">Reimburse</option>
+                                      </select>
+                                      <input type="text" className="form-input" placeholder="Desc" required value={adjDesc} onChange={e => setAdjDesc(e.target.value)} />
+                                      <input type="number" step="0.01" className="form-input" placeholder="$0.00" style={{width: '80px'}} required value={adjAmount} onChange={e => setAdjAmount(e.target.value)} />
+                                      <button type="submit" className="btn btn-secondary" style={{padding: '0.5rem 1rem'}}>Add</button>
+                                  </form>
+                              )}
+                          </div>
                       </div>
                   </div>
 
-                  <div className="flex justify-end gap-4 mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
-                      <button className="btn btn-secondary" onClick={handleCloseModal}>Cancel</button>
+                  <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
                       {selectedBatch.status === 'pending' && (
-                          <button className="btn btn-primary" onClick={() => updateBatchStatus(selectedBatch.id, 'approved')}>
-                              Approve Batch
-                          </button>
+                          <div className="mb-4">
+                              <label className="form-label">Review Notes (Optional)</label>
+                              <textarea className="form-input" rows="2" value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="E.g., Missing receipt photo..."></textarea>
+                          </div>
                       )}
+                      
+                      <div className="flex justify-end gap-4">
+                          <button className="btn btn-secondary" onClick={handleCloseModal}>Cancel</button>
+                          {selectedBatch.status === 'pending' && (
+                              <>
+                                  <button className="btn btn-secondary" style={{color: 'var(--status-error)', borderColor: 'var(--status-error)'}} onClick={() => updateBatchStatus(selectedBatch.id, 'rejected', reviewNotes)}>
+                                      Reject Batch
+                                  </button>
+                                  <button className="btn btn-primary" onClick={() => updateBatchStatus(selectedBatch.id, 'verified', reviewNotes)}>
+                                      Verify Batch
+                                  </button>
+                              </>
+                          )}
+                      </div>
                   </div>
               </div>
           </div>
@@ -226,6 +446,96 @@ export default function AdminDashboard() {
                           </button>
                       </div>
                   </form>
+              </div>
+          </div>
+      )}
+
+      {/* Payroll Modal */}
+      {showPayrollModal && (
+          <div className="modal-overlay">
+              <div className="modal-content glass-card" style={{ maxWidth: '600px' }}>
+                  <button className="modal-close" onClick={() => setShowPayrollModal(false)}>X</button>
+                  <h3 className="mb-4">Run Payroll Summary</h3>
+                  
+                  {payrollSummary.length === 0 ? (
+                      <p>No verified batches ready for payroll.</p>
+                  ) : (
+                      <div className="flex flex-col gap-2">
+                          {payrollSummary.map(op => (
+                              <div key={op.operatorId} className="flex justify-between items-center" style={{ padding: '0.5rem 1rem', border: '1px solid var(--glass-border)', borderRadius: '0.5rem', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                                  <div>
+                                      <div style={{ fontWeight: 600 }}>Operator: {operators[op.operatorId] || op.operatorId}</div>
+                                      <div style={{fontSize:'0.875rem', color: 'var(--text-secondary)'}}>{op.batchIds.length} batches to process</div>
+                                  </div>
+                                  <div style={{ fontWeight: 600, fontSize: '1.2rem', color: 'var(--status-paid)' }}>${op.total.toFixed(2)}</div>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+
+                  <div className="flex justify-end gap-4 mt-6 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                      <button className="btn btn-secondary" onClick={() => setShowPayrollModal(false)}>Cancel</button>
+                      <button className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleRunPayroll} disabled={isProcessingPayroll || payrollSummary.length === 0}>
+                          {isProcessingPayroll ? 'Processing...' : 'Confirm & Run ACH Transfers'}
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* 1099 Modal */}
+      {show1099Modal && (
+          <div className="modal-overlay">
+              <div className="modal-content glass-card" style={{ maxWidth: '600px', maxHeight: '80vh', overflowY: 'auto' }}>
+                  <button className="modal-close" onClick={() => setShow1099Modal(false)}>X</button>
+                  <h3 className="mb-4">Generate 1099s</h3>
+                  
+                  <form onSubmit={handleGenerate1099} className="flex gap-4 items-end mb-4">
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Tax Year</label>
+                          <input type="number" className="form-input" required value={year1099} onChange={e => setYear1099(e.target.value)} />
+                      </div>
+                      <button type="submit" className="btn btn-primary" disabled={isGenerating1099}>
+                          {isGenerating1099 ? 'Generating...' : 'Run Generation'}
+                      </button>
+                  </form>
+                  
+                  {taxResults && (
+                      <div className="mt-4">
+                          <h4 style={{marginBottom: '0.5rem'}}>Results for {year1099}</h4>
+                          <p style={{marginBottom: '1rem', fontSize: '0.875rem', color: 'var(--text-secondary)'}}>Found {taxResults.length} operators with $600+ YTD earnings.</p>
+                          
+                          <div className="flex flex-col gap-2">
+                              {taxResults.map(r => (
+                                  <div key={r.operatorId} className="glass-card" style={{ padding: '0.75rem', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                                      <div className="flex justify-between" style={{fontWeight: 600}}>
+                                          <span>{r.name}</span>
+                                          <span style={{color: 'var(--status-paid)'}}>${r.ytdTotal.toFixed(2)}</span>
+                                      </div>
+                                      <div style={{fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
+                                          {r.email} | SSN/EIN: {r.ssnOrEin}
+                                      </div>
+                                  </div>
+                              ))}
+                              {taxResults.length === 0 && <p>No operators met the $600 threshold.</p>}
+                          </div>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
+
+      {paystubPdfData && (
+          <div className="modal-overlay" onClick={() => setPaystubPdfData(null)}>
+              <div className="modal-content" onClick={e => e.stopPropagation()} style={{ width: '90%', maxWidth: '800px', height: '85vh', display: 'flex', flexDirection: 'column' }}>
+                  <div className="flex justify-between items-center mb-4">
+                      <h3>Paystub Preview</h3>
+                      <div className="flex gap-4">
+                          <a href={paystubPdfData.url} download={paystubPdfData.filename} className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)', textDecoration: 'none', display: 'flex', alignItems: 'center'}}>Download PDF</a>
+                          <button className="btn btn-secondary" onClick={() => setPaystubPdfData(null)}>Close</button>
+                      </div>
+                  </div>
+                  <iframe src={paystubPdfData.url} style={{ width: '100%', flex: 1, border: 'none', borderRadius: '8px', backgroundColor: '#fff' }} title="Paystub Preview"></iframe>
               </div>
           </div>
       )}

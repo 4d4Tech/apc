@@ -2,6 +2,9 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { getFirestore } = require("firebase-admin/firestore");
 const { initializeApp } = require("firebase-admin/app");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const Stripe = require('stripe');
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_mock_key');
+const { onRequest } = require("firebase-functions/v2/https");
 
 initializeApp();
 
@@ -9,7 +12,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 exports.extractbatchdata = onCall(async (request) => {
     const imageUrl = request.data.imageUrl;
-    
+
     if (!imageUrl) {
         throw new HttpsError('invalid-argument', 'The function must be called with an imageUrl.');
     }
@@ -21,7 +24,8 @@ exports.extractbatchdata = onCall(async (request) => {
         const base64Image = buffer.toString('base64');
         const mimeType = response.headers.get('content-type') || 'image/jpeg';
 
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
+
 
         const prompt = `Extract the 'Total Amount' and the number of transactions/record count (which represents the expected item count/boots) from this batch summary ticket. Return ONLY a valid JSON object exactly like this: {"batchTotalAmount": 123.45, "expectedItemCount": 5}. Do not include any markdown formatting or extra text.`;
         const imageParts = [
@@ -35,11 +39,11 @@ exports.extractbatchdata = onCall(async (request) => {
 
         const result = await model.generateContent([prompt, ...imageParts]);
         const textResponse = result.response.text();
-        
+
         // Strip markdown code blocks if any
         let cleanText = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
         const data = JSON.parse(cleanText);
-        
+
         return data;
 
     } catch (error) {
@@ -89,7 +93,256 @@ exports.addOperator = onCall(async (request) => {
     }
 });
 
+exports.runPayroll = onCall(async (request) => {
+    if (!request.auth || !request.auth.uid) {
+        throw new HttpsError('unauthenticated', 'Only authenticated admins can run payroll.');
+    }
+
+    const adminDoc = await getFirestore().collection('users').doc(request.auth.uid).get();
+    if (!adminDoc.exists || adminDoc.data().role !== 'admin') {
+        throw new HttpsError('permission-denied', 'Only admins can run payroll.');
+    }
+
+    const { batchId } = request.data;
+    if (!batchId) {
+        throw new HttpsError('invalid-argument', 'Missing batchId.');
+    }
+
+    try {
+        const batchRef = getFirestore().collection('batches').doc(batchId);
+        const batchDoc = await batchRef.get();
+
+        if (!batchDoc.exists) {
+            throw new HttpsError('not-found', 'Batch not found.');
+        }
+
+        const batchData = batchDoc.data();
+        if (batchData.status !== 'verified') {
+            throw new HttpsError('failed-precondition', 'Batch must be verified to run payroll.');
+        }
+
+        const operatorDoc = await getFirestore().collection('users').doc(batchData.operatorId).get();
+        const operatorData = operatorDoc.exists ? operatorDoc.data() : {};
+
+        const totalAmount = batchData.calculatedPay || 0;
+        let finalAmount = totalAmount;
+        if (batchData.adjustments && Array.isArray(batchData.adjustments)) {
+            batchData.adjustments.forEach(adj => {
+                if (adj.type === 'deduction') finalAmount -= adj.amount;
+                if (adj.type === 'reimbursement') finalAmount += adj.amount;
+            });
+        }
+
+        if (operatorData.stripeAccountId && finalAmount > 0) {
+            console.log(`Simulated transfer to ${operatorData.stripeAccountId} for $${finalAmount}`);
+        }
+
+        await batchRef.update({
+            status: 'processing',
+            finalPayoutAmount: finalAmount,
+            payrollRunAt: new Date()
+        });
+
+        return { success: true, finalAmount };
+    } catch (error) {
+        console.error("Error running payroll:", error);
+        throw new HttpsError('internal', error.message || 'Failed to run payroll.');
+    }
+});
+
+exports.stripeWebhook = onRequest(async (req, res) => {
+    const event = req.body;
+    try {
+        if (event.type === 'payout.paid') {
+            console.log("Payout paid:", event);
+        }
+        res.status(200).send('Webhook received');
+    } catch (err) {
+        console.error('Webhook error:', err.message);
+        res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+});
+
 exports.generatepaystub = onCall(async (request) => {
-    // implementation to come later
-    return { success: true };
+    if (!request.auth || !request.auth.uid) {
+        throw new HttpsError('unauthenticated', 'Only admins can generate paystubs.');
+    }
+    const adminDoc = await getFirestore().collection('users').doc(request.auth.uid).get();
+    if (!adminDoc.exists || adminDoc.data().role !== 'admin') {
+        throw new HttpsError('permission-denied', 'Only admins can generate paystubs.');
+    }
+
+    const { batchId } = request.data;
+    if (!batchId) throw new HttpsError('invalid-argument', 'Missing batchId.');
+
+    try {
+        const batchRef = getFirestore().collection('batches').doc(batchId);
+        const batchDoc = await batchRef.get();
+        if (!batchDoc.exists) throw new HttpsError('not-found', 'Batch not found.');
+        
+        const batchData = batchDoc.data();
+        const operatorId = batchData.operatorId;
+
+        const operatorDoc = await getFirestore().collection('users').doc(operatorId).get();
+        const operatorData = operatorDoc.exists ? operatorDoc.data() : {};
+
+        const secureDoc = await getFirestore().collection('operator_secure_data').doc(operatorId).get();
+        const ssn = secureDoc.exists ? secureDoc.data().ssn : null;
+
+        // Calculate YTD (same logic as 1099, but for the year of the batch)
+        const batchDate = batchData.date ? batchData.date.toDate() : new Date();
+        const year = batchDate.getFullYear();
+        const startOfYear = new Date(`${year}-01-01T00:00:00Z`);
+        const endOfYear = new Date(`${year}-12-31T23:59:59Z`);
+
+        const batchesSnap = await getFirestore().collection('batches')
+            .where('operatorId', '==', operatorId)
+            .where('status', 'in', ['paid', 'processing'])
+            .get();
+
+        let ytdTotal = 0;
+        batchesSnap.docs.forEach(bDoc => {
+            const b = bDoc.data();
+            if (b.payrollRunAt) {
+                const runDate = b.payrollRunAt.toDate();
+                if (runDate >= startOfYear && runDate <= endOfYear && runDate <= batchDate) {
+                    ytdTotal += (b.finalPayoutAmount || 0);
+                }
+            }
+        });
+
+        // Get transactions for daily breakdown
+        const txSnap = await getFirestore().collection(`batches/${batchId}/transactions`).get();
+        const transactions = txSnap.docs.map(d => d.data());
+
+        const dailyMap = {};
+        transactions.forEach(tx => {
+            const d = tx.timestamp ? tx.timestamp.toDate() : batchDate;
+            const dayKey = d.toLocaleDateString();
+            if (!dailyMap[dayKey]) {
+                dailyMap[dayKey] = {
+                    dateObj: d,
+                    booted: 0
+                };
+            }
+            dailyMap[dayKey].booted += 1;
+        });
+
+        const dailyStats = Object.values(dailyMap).sort((a, b) => a.dateObj - b.dateObj).map(d => ({
+            day: d.dateObj.toLocaleDateString('en-US', { weekday: 'long' }),
+            date: d.dateObj.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' }),
+            booted: d.booted,
+            total: d.booted
+        }));
+        
+        // If no transactions, just use the batch date and expected count
+        if (dailyStats.length === 0) {
+            dailyStats.push({
+                day: batchDate.toLocaleDateString('en-US', { weekday: 'long' }),
+                date: batchDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' }),
+                booted: batchData.expectedItemCount || 0,
+                total: batchData.expectedItemCount || 0
+            });
+        }
+
+        const payRate = operatorData.ratePerBoot || 10;
+        const totalBooted = dailyStats.reduce((sum, d) => sum + d.booted, 0);
+        let basePay = totalBooted * payRate;
+        
+        // Add adjustments
+        let bonus = 0;
+        if (batchData.adjustments) {
+            batchData.adjustments.forEach(adj => {
+                if (adj.type === 'reimbursement') bonus += adj.amount;
+                if (adj.type === 'deduction') basePay -= adj.amount;
+            });
+        }
+
+        return {
+            success: true,
+            data: {
+                employee: {
+                    name: operatorData.name || 'Unknown',
+                    phone: operatorData.phone || 'N/A',
+                    email: operatorData.email || 'N/A',
+                    ssnLast4: ssn ? `xxx-xx-${ssn.slice(-4)}` : 'xxx-xx-xxxx'
+                },
+                payPeriod: {
+                    startDate: dailyStats[0]?.date || batchDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' }),
+                    endDate: dailyStats[dailyStats.length - 1]?.date || batchDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })
+                },
+                manager: "Frank Martinez",
+                dailyStats,
+                summary: {
+                    payRate: payRate,
+                    totalBooted: totalBooted,
+                    totalAmount: basePay,
+                    bonus: bonus,
+                    grossTotal: batchData.finalPayoutAmount || (basePay + bonus),
+                    ytd: ytdTotal || (basePay + bonus)
+                }
+            }
+        };
+    } catch (error) {
+        console.error("Error generating paystub:", error);
+        throw new HttpsError('internal', error.message);
+    }
+});
+
+exports.generate1099 = onCall(async (request) => {
+    if (!request.auth || !request.auth.uid) {
+        throw new HttpsError('unauthenticated', 'Only admins can generate 1099s.');
+    }
+    const adminDoc = await getFirestore().collection('users').doc(request.auth.uid).get();
+    if (!adminDoc.exists || adminDoc.data().role !== 'admin') {
+        throw new HttpsError('permission-denied', 'Only admins can generate 1099s.');
+    }
+
+    const { year } = request.data;
+    if (!year) throw new HttpsError('invalid-argument', 'Missing year.');
+
+    try {
+        const operatorsSnap = await getFirestore().collection('users').where('role', '==', 'operator').get();
+        const results = [];
+
+        const start = new Date(`${year}-01-01T00:00:00Z`);
+        const end = new Date(`${year}-12-31T23:59:59Z`);
+
+        for (const opDoc of operatorsSnap.docs) {
+            const operatorId = opDoc.id;
+            const batchesSnap = await getFirestore().collection('batches')
+                .where('operatorId', '==', operatorId)
+                .where('status', 'in', ['paid', 'processing'])
+                .get();
+
+            let ytdTotal = 0;
+            batchesSnap.docs.forEach(bDoc => {
+                const b = bDoc.data();
+                if (b.payrollRunAt) {
+                    const runDate = b.payrollRunAt.toDate();
+                    if (runDate >= start && runDate <= end) {
+                        ytdTotal += (b.finalPayoutAmount || 0);
+                    }
+                }
+            });
+
+            if (ytdTotal >= 600) {
+                const secureDoc = await getFirestore().collection('operator_secure_data').doc(operatorId).get();
+                const ssn = secureDoc.exists ? secureDoc.data().ssn : null;
+
+                results.push({
+                    operatorId,
+                    name: opDoc.data().name,
+                    email: opDoc.data().email,
+                    ssnOrEin: ssn ? `***-**-${ssn.slice(-4)}` : 'N/A',
+                    ytdTotal
+                });
+            }
+        }
+
+        return { success: true, year, generatedCount: results.length, data: results };
+    } catch (error) {
+        console.error("Error generating 1099s:", error);
+        throw new HttpsError('internal', error.message);
+    }
 });

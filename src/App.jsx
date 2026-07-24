@@ -10,6 +10,7 @@ import NewBatch from './pages/NewBatch';
 import BatchDetails from './pages/BatchDetails';
 import AdminDashboard from './pages/AdminDashboard';
 import OperatorRates from './pages/OperatorRates';
+import Onboarding from './pages/Onboarding';
 
 // Protected Route Wrapper
 const ProtectedRoute = ({ children, requiredRole }) => {
@@ -38,6 +39,11 @@ function App() {
           <Route path="/signup" element={<Signup />} />
           
           {/* Operator Routes */}
+          <Route path="/onboarding" element={
+            <ProtectedRoute requiredRole="operator">
+              <Onboarding />
+            </ProtectedRoute>
+          } />
           <Route path="/operator" element={
             <ProtectedRoute requiredRole="operator">
               <OperatorDashboard />

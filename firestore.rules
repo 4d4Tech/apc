@@ -11,5 +11,9 @@ service cloud.firestore {
         allow read, write: if request.auth != null && (get(/databases/$(database)/documents/batches/$(batchId)).data.operatorId == request.auth.uid || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
       }
     }
+    
+    match /operator_secure_data/{uid} {
+      allow read, write: if request.auth != null && (request.auth.uid == uid || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
   }
 }

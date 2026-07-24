@@ -101,6 +101,16 @@ export default function BatchDetails() {
 
   const isMatched = transactions.length === batch.expectedItemCount;
 
+  // Calculate Ledger
+  const grossPay = batch.calculatedPay || 0;
+  let netPay = grossPay;
+  if (batch.adjustments) {
+      batch.adjustments.forEach(adj => {
+          if (adj.type === 'deduction') netPay -= adj.amount;
+          if (adj.type === 'reimbursement') netPay += adj.amount;
+      });
+  }
+
   return (
     <div className="container mt-8 pb-8">
       <div className="flex justify-between items-center mb-4">
@@ -118,6 +128,31 @@ export default function BatchDetails() {
         </div>
         {isMatched && <div style={{ color: 'var(--status-paid)' }} className="flex items-center gap-2"><CheckCircle2/> MATCHED</div>}
       </div>
+
+      {/* Ledger View */}
+      {['verified', 'processing', 'paid'].includes(batch.status) && (
+          <div className="glass-card mb-4" style={{ backgroundColor: 'rgba(99, 91, 255, 0.05)', borderColor: 'var(--accent-primary)' }}>
+              <h3 style={{ color: 'var(--accent-primary)' }}>Payroll Ledger</h3>
+              <div className="flex flex-col mt-4" style={{ gap: '0.5rem' }}>
+                  <div className="flex justify-between text-lg">
+                      <span>Gross Earnings ({batch.expectedItemCount} boots)</span>
+                      <span>${grossPay.toFixed(2)}</span>
+                  </div>
+                  
+                  {batch.adjustments?.map((adj, idx) => (
+                      <div key={idx} className="flex justify-between" style={{ color: adj.type === 'deduction' ? 'var(--status-error)' : 'var(--status-paid)' }}>
+                          <span>{adj.description}</span>
+                          <span>{adj.type === 'deduction' ? '-' : '+'}${adj.amount.toFixed(2)}</span>
+                      </div>
+                  ))}
+
+                  <div className="flex justify-between mt-2 pt-2" style={{ borderTop: '1px solid var(--glass-border)', fontWeight: 600, fontSize: '1.25rem' }}>
+                      <span>Net Payout</span>
+                      <span style={{ color: 'var(--status-paid)' }}>${netPay.toFixed(2)}</span>
+                  </div>
+              </div>
+          </div>
+      )}
 
       <div className="glass-card mb-4">
         <h3>Add Vehicle</h3>

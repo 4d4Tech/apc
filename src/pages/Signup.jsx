@@ -8,6 +8,7 @@ export default function Signup() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
+  const [ssn, setSsn] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -32,11 +33,19 @@ export default function Signup() {
         lastName,
         phone,
         email,
+        payoutsEnabled: false,
         ratePerBoot: 10 // Default rate, admin can change this later
       });
 
-      // Navigate to operator dashboard
-      navigate('/operator');
+      // 3. Store secure data
+      await setDoc(doc(db, 'operator_secure_data', user.uid), {
+        ssn,
+        w9_submitted: true,
+        updatedAt: new Date()
+      });
+
+      // Navigate to onboarding dashboard
+      navigate('/onboarding');
     } catch (err) {
       setError(err.message || 'Failed to create an account.');
       console.error(err);
@@ -83,6 +92,18 @@ export default function Signup() {
               value={phone} 
               onChange={e => setPhone(e.target.value)} 
               required 
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Social Security Number / EIN</label>
+            <input 
+              type="text" 
+              className="form-input" 
+              value={ssn} 
+              onChange={e => setSsn(e.target.value)} 
+              required 
+              placeholder="XXX-XX-XXXX"
             />
           </div>
 
