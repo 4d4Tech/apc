@@ -174,21 +174,27 @@ a:hover {
 }
 
 .badge-pending {
-  background-color: rgba(245, 158, 11, 0.1);
-  color: var(--status-pending);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  background-color: #3b0764;
+  color: #d8b4fe;
+  border: 1px solid #581c87;
 }
 
-.badge-approved {
-  background-color: rgba(59, 130, 246, 0.1);
-  color: var(--status-approved);
-  border: 1px solid rgba(59, 130, 246, 0.2);
+.badge-verified {
+  background-color: #0c4a6e;
+  color: #7dd3fc;
+  border: 1px solid #0369a1;
 }
 
 .badge-paid {
-  background-color: rgba(16, 185, 129, 0.1);
-  color: var(--status-paid);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  background-color: #064e3b;
+  color: #6ee7b7;
+  border: 1px solid #047857;
+}
+
+.badge-rejected {
+  background-color: #450a0a;
+  color: #fca5a5;
+  border: 1px solid #b91c1c;
 }
 
 /* Modal */
@@ -249,4 +255,40 @@ a:hover {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Tables */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+th {
+  padding: 0.75rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--glass-border);
+  letter-spacing: 0.05em;
+}
+
+td {
+  padding: 1rem;
+  border-bottom: 1px solid var(--glass-border);
+  vertical-align: middle;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+.table-row-hover:hover {
+  background-color: rgba(255, 255, 255, 0.02);
 }

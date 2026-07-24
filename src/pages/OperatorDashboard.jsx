@@ -4,6 +4,7 @@ import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
+import { MessageSquare } from 'lucide-react';
 
 export default function OperatorDashboard() {
   const { userData } = useAuth();
@@ -83,8 +84,18 @@ export default function OperatorDashboard() {
                   {batch.expectedItemCount} boots
                 </div>
               </div>
-              <div className={`badge badge-${batch.status}`}>
-                {batch.status}
+              <div className="flex items-center gap-2">
+                <div className={`badge badge-${batch.status}`}>
+                  {batch.status}
+                </div>
+                {batch.reviewNotes && (
+                    <MessageSquare 
+                        size={16} 
+                        style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
+                        title={batch.reviewNotes}
+                        onClick={() => alert(`Admin Note:\n\n${batch.reviewNotes}`)}
+                    />
+                )}
               </div>
             </div>
           ))}

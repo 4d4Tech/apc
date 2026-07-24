@@ -9,7 +9,7 @@ import OperatorDashboard from './pages/OperatorDashboard';
 import NewBatch from './pages/NewBatch';
 import BatchDetails from './pages/BatchDetails';
 import AdminDashboard from './pages/AdminDashboard';
-import OperatorRates from './pages/OperatorRates';
+import OperatorManagement from './pages/OperatorManagement';
 import Onboarding from './pages/Onboarding';
 
 // Protected Route Wrapper
@@ -66,9 +66,9 @@ function App() {
               <AdminDashboard />
             </ProtectedRoute>
           } />
-          <Route path="/admin/rates" element={
+          <Route path="/admin/operators" element={
             <ProtectedRoute requiredRole="admin">
-              <OperatorRates />
+              <OperatorManagement />
             </ProtectedRoute>
           } />
 

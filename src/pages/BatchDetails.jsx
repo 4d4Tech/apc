@@ -19,10 +19,9 @@ export default function BatchDetails() {
   const [cardLast4, setCardLast4] = useState('');
   const [amount, setAmount] = useState('');
   
-  const [vehiclePic, setVehiclePic] = useState(null);
+  const [vehiclePics, setVehiclePics] = useState([]);
   const [receiptPic, setReceiptPic] = useState(null);
   const [releasePic, setReleasePic] = useState(null);
-  const [uploadingTx, setUploadingTx] = useState(false);
 
   useEffect(() => {
     const fetchBatchData = async () => {
@@ -43,47 +42,75 @@ export default function BatchDetails() {
 
   const handleAddTransaction = async (e) => {
     e.preventDefault();
-    if (!vehiclePic || !receiptPic || !releasePic) {
+    if (vehiclePics.length === 0 || !receiptPic || !releasePic) {
         alert("Please upload all required photos (Vehicle, Receipt, Release Form)");
         return;
     }
-    setUploadingTx(true);
-    
-    try {
-      const uploadImage = async (file, type) => {
-        const fileRef = ref(storage, `uploads/${auth.currentUser.uid}/transactions/${batchId}/${Date.now()}_${type}`);
-        await uploadBytes(fileRef, file);
-        return await getDownloadURL(fileRef);
-      };
 
-      const vehicleUrl = await uploadImage(vehiclePic, 'vehicle');
-      const receiptUrl = await uploadImage(receiptPic, 'receipt');
-      const releaseUrl = await uploadImage(releasePic, 'release');
-
-      const newTx = {
+    // Capture current form state
+    const tempId = `temp_${Date.now()}`;
+    const txData = {
+        id: tempId,
         licensePlate: plate,
         vehicleDescription: desc,
         cardLast4: cardLast4,
         amountPaid: Number(amount),
-        photos: {
-          vehicle: vehicleUrl,
-          receipt: receiptUrl,
-          release: releaseUrl
+        isUploading: true
+    };
+    const capturedVehiclePics = [...vehiclePics];
+    const capturedReceiptPic = receiptPic;
+    const capturedReleasePic = releasePic;
+
+    // Optimistically add to UI
+    setTransactions(prev => [...prev, txData]);
+
+    // Reset form immediately so user can keep typing
+    setPlate(''); setDesc(''); setCardLast4(''); setAmount('');
+    
+    // For file inputs, we also need to clear the actual DOM elements if they have a value, 
+    // but clearing the state will prevent them from being reused on next submit anyway.
+    setVehiclePics([]); setReceiptPic(null); setReleasePic(null);
+    document.getElementById('vehiclePhotoInput').value = '';
+    document.getElementById('receiptPhotoInput').value = '';
+    document.getElementById('releasePhotoInput').value = '';
+
+    // Fire and forget upload
+    (async () => {
+        try {
+            const uploadImage = async (file, type) => {
+                const fileRef = ref(storage, `uploads/${auth.currentUser.uid}/transactions/${batchId}/${Date.now()}_${type}`);
+                await uploadBytes(fileRef, file);
+                return await getDownloadURL(fileRef);
+            };
+
+            const vehicleUrls = await Promise.all(
+                capturedVehiclePics.map((pic, idx) => uploadImage(pic, `vehicle_${idx}`))
+            );
+            
+            const receiptUrl = await uploadImage(capturedReceiptPic, 'receipt');
+            const releaseUrl = await uploadImage(capturedReleasePic, 'release');
+
+            const newTx = {
+                licensePlate: txData.licensePlate,
+                vehicleDescription: txData.vehicleDescription,
+                cardLast4: txData.cardLast4,
+                amountPaid: txData.amountPaid,
+                photos: {
+                  vehicle: vehicleUrls,
+                  receipt: receiptUrl,
+                  release: releaseUrl
+                }
+            };
+
+            const docRef = await addDoc(collection(db, `batches/${batchId}/transactions`), newTx);
+            
+            // Replace optimistic temp transaction with real one
+            setTransactions(prev => prev.map(t => t.id === tempId ? { id: docRef.id, ...newTx } : t));
+        } catch (err) {
+            console.error("Background upload failed:", err);
+            setTransactions(prev => prev.map(t => t.id === tempId ? { ...t, isUploading: false, hasError: true } : t));
         }
-      };
-
-      const docRef = await addDoc(collection(db, `batches/${batchId}/transactions`), newTx);
-      setTransactions([...transactions, { id: docRef.id, ...newTx }]);
-
-      // Reset form
-      setPlate(''); setDesc(''); setCardLast4(''); setAmount('');
-      setVehiclePic(null); setReceiptPic(null); setReleasePic(null);
-
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setUploadingTx(false);
-    }
+    })();
   };
 
   const handleSubmitBatch = async () => {
@@ -91,6 +118,16 @@ export default function BatchDetails() {
       await updateDoc(doc(db, 'batches', batchId), { status: 'pending' });
       alert("Batch submitted successfully for admin review!");
       navigate('/operator');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleSubmitAndAddAnother = async () => {
+    try {
+      await updateDoc(doc(db, 'batches', batchId), { status: 'pending' });
+      alert("Batch submitted! You can now start another one.");
+      navigate('/operator/new-batch');
     } catch (err) {
       console.error(err);
     }
@@ -177,20 +214,20 @@ export default function BatchDetails() {
           </div>
 
           <div className="form-group">
-             <label className="form-label">Vehicle Photo</label>
-             <input type="file" accept="image/*" onChange={e => setVehiclePic(e.target.files[0])} className="form-input" required/>
+             <label className="form-label">Vehicle Photo(s)</label>
+             <input id="vehiclePhotoInput" type="file" accept="image/*" multiple onChange={e => setVehiclePics(Array.from(e.target.files))} className="form-input" required/>
           </div>
           <div className="form-group">
              <label className="form-label">Receipt Photo</label>
-             <input type="file" accept="image/*" onChange={e => setReceiptPic(e.target.files[0])} className="form-input" required/>
+             <input id="receiptPhotoInput" type="file" accept="image/*" onChange={e => setReceiptPic(e.target.files[0])} className="form-input" required/>
           </div>
           <div className="form-group">
              <label className="form-label">Release Form Photo</label>
-             <input type="file" accept="image/*" onChange={e => setReleasePic(e.target.files[0])} className="form-input" required/>
+             <input id="releasePhotoInput" type="file" accept="image/*" onChange={e => setReleasePic(e.target.files[0])} className="form-input" required/>
           </div>
 
-          <button type="submit" className="btn btn-primary mt-4" style={{ width: '100%' }} disabled={uploadingTx || isMatched}>
-            {uploadingTx ? 'Uploading & Saving...' : 'Save Transaction'}
+          <button type="submit" className="btn btn-primary mt-4" style={{ width: '100%' }} disabled={isMatched}>
+            Save Transaction
           </button>
         </form>
       </div>
@@ -206,8 +243,19 @@ export default function BatchDetails() {
                             <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)'}}>{tx.vehicleDescription}</div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontWeight: 600 }}>${tx.amountPaid.toFixed(2)}</div>
-                            <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)'}}>*{tx.cardLast4}</div>
+                            {tx.isUploading ? (
+                                <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+                                    <div className="spinner" style={{ width: '16px', height: '16px', borderTopColor: 'var(--accent-primary)', borderRightColor: 'var(--accent-primary)', borderBottomColor: 'var(--accent-primary)'}}></div>
+                                    <span style={{ fontSize: '0.875rem' }}>Uploading...</span>
+                                </div>
+                            ) : tx.hasError ? (
+                                <div style={{ color: 'var(--status-error)', fontSize: '0.875rem' }}>Upload Failed</div>
+                            ) : (
+                                <>
+                                    <div style={{ fontWeight: 600 }}>${tx.amountPaid.toFixed(2)}</div>
+                                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)'}}>*{tx.cardLast4}</div>
+                                </>
+                            )}
                         </div>
                     </div>
                 ))}
@@ -216,9 +264,14 @@ export default function BatchDetails() {
       )}
 
       {isMatched && (
-          <button className="btn btn-primary" style={{ width: '100%', backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleSubmitBatch}>
-            Submit Full Daily Batch
-          </button>
+          <div className="flex flex-col gap-4">
+              <button className="btn btn-primary" style={{ width: '100%', backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleSubmitBatch}>
+                Submit Full Daily Batch & Return
+              </button>
+              <button className="btn btn-secondary" style={{ width: '100%' }} onClick={handleSubmitAndAddAnother}>
+                Submit & Add Another Batch
+              </button>
+          </div>
       )}
 
     </div>

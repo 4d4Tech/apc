@@ -1,88 +1,105 @@
-# Enhancement Blueprint: APC Batch-Verification & Enterprise Payroll Capabilities
+# Architectural Enhancement Blueprint: Admin Dashboard UI & Functionality
 
-## 1. Architectural Strategy & Scope
-This blueprint outlines the integration of Gusto-level enterprise payroll capabilities while strictly preserving Austin Parking Company's (APC) core daily batch-verification workflow. The operational pipeline (receipt images, vehicle photos, and line-item verification) acts as the foundational trigger for all automated payroll events.
+## 1. Overview & Objectives
+This document specifies the UX, visual, and operational enhancements required for the `AdminDashboard.jsx` interface[cite: 1]. The goal is to evolve the view from a basic list-based dashboard into an enterprise-grade control panel mirroring modern platforms like Gusto and QuickBooks. 
 
-The application leverages a serverless ecosystem using React 18 on the Vite frontend and Google Firebase (Firestore, Cloud Functions, Auth, Storage) for backend execution.
-
-### Third-Party Integrations Required
-*   **Payment Gateway (Stripe Connect):** For handling KYC (Know Your Customer) compliance, bank account linking, and executing automated ACH direct deposits.
-*   **Tax API (e.g., TaxBandits or Stripe Tax):** For generating, validating, and e-filing end-of-year 1099-NEC forms.
+Key enhancements focus on introducing high-level metric cards, converting list views into structured/filterable data tables, adding bulk-approval controls, and improving data formatting resilience.
 
 ---
 
-## 2. Epic 1: Daily Batch-Verification & Operational Tracking (Core Workflow)
-**Objective:** Maintain and optimize the specialized internal workflow where operators submit daily documentation for admin review before any compensation is calculated.
+## 2. Front-End Component Structure & Layout
 
-### User Stories & Acceptance Criteria
-*   **Story 1.1:** As an Operator, I want to submit my daily batch (vehicle photos, receipt images, transaction counts) securely so that my shift is recorded for review.
-    *   *Acceptance Criteria:* `NewBatch.jsx` allows multi-file image uploads. Files are routed securely to Firebase Storage, and the data payload is logged to the Firestore `batches` collection with a default status of `pending`.
-*   **Story 1.2:** As an Admin, I want to review pending batches against line items to verify accuracy before approving payouts.
-    *   *Acceptance Criteria:* `BatchDetails.jsx` displays a side-by-side view of operator-submitted images and entered transaction data. Admins can change the status to `verified` or `rejected` with accompanying notes.
-    *   *Acceptance Criteria:* The payroll calculation engine will strictly ignore any batch that does not carry the `verified` status flag.
+### 2.1 Summary Metrics Banner (Top Bar)
+Add a summary statistics section above the main batch feeds to give admins instantaneous operational visibility:
+* **Total Pending Payout ($):** Calculated sum of all batches currently in `verified` status awaiting execution.
+* **Active Operators:** Total number of active operators registered in Firestore.
+* **Pending Verification:** Count of batches currently awaiting admin review (`pending` status).
 
-### Implementation Details
-*   **Storage & Security:** `storage.rules` must ensure that receipt and vehicle images can only be read by authenticated admins and the specific operator who uploaded them.
-*   **Data Flow:** The `verified` state change in Firestore acts as the absolute prerequisite gatekeeper for Epic 3 (ACH Direct Deposit).
+### 2.2 Re-architecting Feeds into Structured Data Tables
+Replace vertical card stacks with flexible, responsive tabular layouts for **Verified Batches** and **Batch History**:
 
----
-
-## 3. Epic 2: Operator Self-Service Onboarding & KYC
-**Objective:** Operators must be able to securely input their own tax information, upload identification, and link bank accounts without admin intervention.
-
-### User Stories & Acceptance Criteria
-*   **Story 2.1:** As an Operator, I want to securely submit my W-9 details during account creation so that I am compliant before submitting my first batch.
-    *   *Acceptance Criteria:* The `Signup.jsx` view routes to a secure onboarding flow. PII (Social Security Numbers, EINs) must be encrypted at rest in a new dedicated, strictly-ruled Firestore collection (e.g., `operator_secure_data`).
-*   **Story 2.2:** As an Operator, I want to link my bank account so I can receive direct deposits.
-    *   *Acceptance Criteria:* Integrate Stripe Elements into the frontend. `OperatorDashboard.jsx` displays the last 4 digits of the linked routing account and a verification status.
-
-### Implementation Details
-*   **Security:** Update `firestore.rules` to ensure that `operator_secure_data` can only be read/written by the specific authenticated user (`request.auth.uid == resource.id`) and system admins.
+| Column Name | Data Field / Mapping | UI Element / Formatter |
+| :--- | :--- | :--- |
+| **Operator** | `operatorName` \|\| `operatorEmail` | Text with fallback utility |
+| **Date** | `createdAt` / `submittedDate` | Formatted Date (`MM/DD/YYYY`) |
+| **Boot/Item Count** | `transactionCount` | Numeric Badge |
+| **Payout Amount** | `totalAmount` | Currency (`$0.00`) |
+| **Status** | `status` | Styled Status Pill Badge |
+| **Actions** | N/A | Action Button Group (`PDF Stub`, `View Docs`)[cite: 1] |
 
 ---
 
-## 4. Epic 3: Automated Clearing House (ACH) Direct Deposit
-**Objective:** Transition from generating static PDF paystubs to automatically moving funds from the company ledger to the operator's bank account based on verified batches.
+## 3. Detailed Feature Specifications
 
-### User Stories & Acceptance Criteria
-*   **Story 3.1:** As an Admin, I want the "Run Payroll" action to aggregate all `verified` batches for an operator and trigger an ACH transfer.
-    *   *Acceptance Criteria:* `AdminDashboard.jsx` includes a payroll confirmation modal summarizing verified batches. Upon approval, selected batch statuses update to `processing`.
-*   **Story 3.2:** As the System, I need to communicate with the payment processor to execute the transfer safely.
-    *   *Acceptance Criteria:* A Node.js Cloud Function in `functions/index.js` listens for the `processing` status. It calculates the total from the operator's commission structures located in `OperatorRates.jsx` and triggers a Stripe Connect Payout.
+### Epic 1: High-Level Analytics & Metrics
+**Goal:** Deliver real-time aggregate financial and operational metrics at top-of-page.
 
-### Implementation Details
-*   **Dependencies:** Add `stripe` to `functions/package.json`.
-*   **Webhook Listener:** Create an HTTP Cloud Function to listen for Stripe webhook events (e.g., `payout.paid`, `payout.failed`) to automatically update the Firestore batch documents to `paid`.
+* **User Story 1.1:** As an Admin, I want to see the total dollar value of verified batches awaiting payment so that I know my immediate payroll cash requirement before hitting "Run Payroll"[cite: 1].
+  * *Acceptance Criteria:* Render a summary card querying Firestore batches where `status == 'verified'`. Automatically compute and display the sum formatted as USD.
 
----
+### Epic 2: Data Filtering, Search & Pagination
+**Goal:** Prevent visual overload as historical batch volume expands.
 
-## 5. Epic 4: Deductions, Reimbursements & Benefits Engine
-**Objective:** Allow custom line-item adjustments to operator paychecks (e.g., uniform deductions, gas reimbursements) prior to payroll execution.
+* **User Story 2.1:** As an Admin, I want to filter batch history by operator name or status so I can quickly audit specific payments.
+  * *Acceptance Criteria:* Add a search input field that filters client-side table results by operator name or UID[cite: 1].
+  * *Acceptance Criteria:* Add a dropdown filter for date ranges (*This Week*, *Last Month*, *All Time*).
 
-### User Stories & Acceptance Criteria
-*   **Story 4.1:** As an Admin, I want to add one-time or recurring deductions/reimbursements to a verified batch before payroll is run.
-    *   *Acceptance Criteria:* Admin dashboard supports adding manual line items to a `verified` batch.
-*   **Story 4.2:** As an Operator, I want to see my gross pay, deductions, and net pay clearly broken down.
-    *   *Acceptance Criteria:* `BatchDetails.jsx` renders a standardized ledger view showing Gross Earnings, Deductions (Taxes, Fees), Reimbursements, and Net Payout. 
+### Epic 3: Workflow Efficiency & Bulk Actions
+**Goal:** Reduce repetitive manual tasks during large payroll runs.
 
-### Implementation Details
-*   **Data Structure:** Update the Firestore `batches` schema to accept an array of `adjustments`:
-    ```json
-    {
-      "type": "deduction" | "reimbursement",
-      "description": "Uniform Fee",
-      "amount": 25.00,
-      "taxable": false
-    }
+* **User Story 3.1:** As an Admin, I want to select multiple verified batches via checkboxes and approve them all simultaneously.
+  * *Acceptance Criteria:* Add a multi-select checkbox column to the "Verified Batches" table.
+  * *Acceptance Criteria:* Provide an "Approve Selected for Payroll" button that updates all checked batch IDs to `processing` in a single batch Firestore write[cite: 1].
+
+### Epic 4: Data Resiliency & ID Mapping Fallbacks
+**Goal:** Standardize operator displays and prevent unformatted database keys from displaying in the UI.
+
+* **User Story 4.1:** As an Admin, I want operator entries without full names to display clean identifiers instead of raw database IDs.
+  * *Acceptance Criteria:* Create a helper function `formatOperatorName(operator)`:
+    ```javascript
+    const formatOperatorName = (operator) => {
+      if (operator.displayName) return operator.displayName;
+      if (operator.email) return operator.email;
+      if (operator.uid) return `Operator (${operator.uid.slice(0, 8)}...)`;
+      return "Unknown Operator";
+    };
     ```
 
 ---
 
-## 6. Epic 5: Year-End Tax Compliance (1099 Generation)
-**Objective:** Automatically track year-to-date (YTD) earnings based on paid batches and generate standardized tax forms.
+## 4. UI/UX Style Guide & Visual Hierarchy
 
-### User Stories & Acceptance Criteria
-*   **Story 5.1:** As an Admin, I want the system to calculate YTD earnings for all operators dynamically.
-    *   *Acceptance Criteria:* Each successful payout webhook triggers a Firestore aggregation function that increments a `ytd_earnings` field on the operator's core profile document.
-*   **Story 5.2:** As an Operator, I want to download my annual 1099 tax document directly from my dashboard.
-    *   *Acceptance Criteria:* `OperatorDashboard.jsx` includes a "Tax Documents" tab. This triggers a Cloud Function that generates a 1099-NEC PDF based on the YTD earnings and the operator's W-9 data.
+### Status Pill Badge Schema
+To enhance visual scannability, apply uniform CSS classes for batch status indicators:
+
+* **`Pending`:** Background `#3b0764` | Text `#d8b4fe` | Border `#581c87` (Soft Purple/Amber)
+* **`Verified`:** Background `#0c4a6e` | Text `#7dd3fc` | Border `#0369a1` (Cyan/Blue)
+* **`Paid`:** Background `#064e3b` | Text `#6ee7b7` | Border `#047857` (Emerald Green)
+* **`Rejected`:** Background `#450a0a` | Text `#fca5a5` | Border `#b91c1c` (Rose Red)
+
+### Layout Wireframe Concept
+```text
++-----------------------------------------------------------------------------------+
+|  Admin Dashboard                  [ $1,240.00 Ready ] [ 12 Operators ] [ 3 Pending ]|
+|  [ Run Payroll ]  [ Year-End Tax (1099) ]  [ Add Operator ]  [ Operator Rates ]    |
++-----------------------------------------------------------------------------------+
+|  PENDING BATCHES (REQUIRES REVIEW)                                                |
+|  +-------------------------------------------------------------------------------+ |
+|  | Operator         | Date       | Items | Amount  | Quick Preview  | Actions    | |
+|  | John Doe         | 07/24/2026 | 4     | $120.00 | [ Thumbnails ] | [Review]   | |
+|  +-------------------------------------------------------------------------------+ |
++-----------------------------------------------------------------------------------+
+|  VERIFIED BATCHES (READY FOR PAYROLL)                  [ Select All ] [ Pay Selected]|
+|  +-------------------------------------------------------------------------------+ |
+|  | [x] | Operator   | Date       | Items | Total   | Status    | Action          | |
+|  | [x] | Brandon R. | 07/24/2026 | 2     | $56.00  | Verified  | [Hold]          | |
+|  +-------------------------------------------------------------------------------+ |
++-----------------------------------------------------------------------------------+
+|  BATCH HISTORY                                         Search: [ Brandon          ]|
+|  +-------------------------------------------------------------------------------+ |
+|  | Operator         | Date       | Status   | Payout   | Documents               | |
+|  | Brandon Robinson | 07/24/2026 | Paid     | $56.00   | [PDF Stub] [View Docs]  | |
+|  | Brandon Robinson | 07/24/2026 | Paid     | $40.00   | [PDF Stub] [View Docs]  | |
+|  | Operator (QS5D)  | 07/22/2026 | Paid     | $0.00    | [PDF Stub] [View Docs]  | |
+|  +-------------------------------------------------------------------------------+ |
++-----------------------------------------------------------------------------------+

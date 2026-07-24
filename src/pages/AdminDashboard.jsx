@@ -5,6 +5,7 @@ import { db, auth, functions } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { generatePaystubPDF } from '../utils/pdfGenerator';
+import { MessageSquare } from 'lucide-react';
 
 export default function AdminDashboard() {
   const [batches, setBatches] = useState([]);
@@ -31,6 +32,11 @@ export default function AdminDashboard() {
   const [isDownloadingPaystub, setIsDownloadingPaystub] = useState(false);
   const [paystubPdfData, setPaystubPdfData] = useState(null);
 
+  // New UI states
+  const [selectedVerifiedBatches, setSelectedVerifiedBatches] = useState([]);
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
+  const [historyDateFilter, setHistoryDateFilter] = useState('all');
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -56,7 +62,6 @@ export default function AdminDashboard() {
   const fetchBatches = async () => {
     setLoading(true);
     try {
-      // Need an index for this or just fetch all and sort on client if small
       const q = query(collection(db, 'batches'), orderBy('date', 'desc'));
       const querySnapshot = await getDocs(q);
       const batchData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -66,6 +71,12 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const formatOperatorName = (operatorId) => {
+      const name = operators[operatorId];
+      if (name && name !== 'Unknown Operator' && name.trim().length > 0) return name;
+      return `Operator (${operatorId.slice(0, 8)}...)`;
   };
 
   const handleViewDocs = async (batch) => {
@@ -174,6 +185,21 @@ export default function AdminDashboard() {
       setShowPayrollModal(true);
   };
 
+  const handleOpenSelectedPayroll = () => {
+      if (selectedVerifiedBatches.length === 0) return;
+      const verified = batches.filter(b => b.status === 'verified' && selectedVerifiedBatches.includes(b.id));
+      const grouped = {};
+      verified.forEach(b => {
+          if (!grouped[b.operatorId]) {
+              grouped[b.operatorId] = { operatorId: b.operatorId, batchIds: [], total: 0 };
+          }
+          grouped[b.operatorId].batchIds.push(b.id);
+          grouped[b.operatorId].total += (b.calculatedPay || 0);
+      });
+      setPayrollSummary(Object.values(grouped));
+      setShowPayrollModal(true);
+  };
+
   const handleRunPayroll = async () => {
       setIsProcessingPayroll(true);
       try {
@@ -184,6 +210,7 @@ export default function AdminDashboard() {
               }
           }
           setShowPayrollModal(false);
+          setSelectedVerifiedBatches([]);
           fetchBatches();
           alert("Payroll processing initiated!");
       } catch (err) {
@@ -229,91 +256,291 @@ export default function AdminDashboard() {
       }
   };
 
+  const handleSelectAllVerified = (e) => {
+      if (e.target.checked) {
+          setSelectedVerifiedBatches(batches.filter(b => b.status === 'verified').map(b => b.id));
+      } else {
+          setSelectedVerifiedBatches([]);
+      }
+  };
+
+  const toggleSelectVerifiedBatch = (batchId) => {
+      if (selectedVerifiedBatches.includes(batchId)) {
+          setSelectedVerifiedBatches(selectedVerifiedBatches.filter(id => id !== batchId));
+      } else {
+          setSelectedVerifiedBatches([...selectedVerifiedBatches, batchId]);
+      }
+  };
+
+  const getFilteredHistory = () => {
+      let filtered = batches.filter(b => b.status === 'paid' || b.status === 'processing' || b.status === 'rejected');
+      
+      if (historySearchTerm) {
+          const lowerSearch = historySearchTerm.toLowerCase();
+          filtered = filtered.filter(b => {
+              const name = formatOperatorName(b.operatorId).toLowerCase();
+              return name.includes(lowerSearch) || b.operatorId.toLowerCase().includes(lowerSearch);
+          });
+      }
+  
+      if (historyDateFilter !== 'all') {
+          filtered = filtered.filter(b => {
+              if (!b.date) return false;
+              const batchDate = b.date.toDate();
+              const now = new Date();
+              
+              if (historyDateFilter === 'thisWeek') {
+                  const startOfWeek = new Date(now);
+                  startOfWeek.setDate(now.getDate() - now.getDay());
+                  startOfWeek.setHours(0,0,0,0);
+                  return batchDate >= startOfWeek;
+              } else if (historyDateFilter === 'lastWeek') {
+                  const startOfThisWeek = new Date(now);
+                  startOfThisWeek.setDate(now.getDate() - now.getDay());
+                  startOfThisWeek.setHours(0,0,0,0);
+                  const startOfLastWeek = new Date(startOfThisWeek);
+                  startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
+                  return batchDate >= startOfLastWeek && batchDate < startOfThisWeek;
+              } else if (historyDateFilter === 'thisMonth') {
+                  return batchDate.getMonth() === now.getMonth() && batchDate.getFullYear() === now.getFullYear();
+              }
+              return true;
+          });
+      }
+      
+      return filtered;
+  };
+
+  const pendingPayoutTotal = batches.filter(b => b.status === 'verified').reduce((sum, b) => sum + (b.calculatedPay || 0), 0);
+  const activeOpsCount = Object.keys(operators).length;
+  const pendingCount = batches.filter(b => b.status === 'pending').length;
+
   return (
     <div className="container mt-8">
-      <div className="flex justify-between items-center mb-4">
-        <h2>Admin Dashboard</h2>
-        <div className="flex gap-2">
-            <button className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleOpenPayroll}>Run Payroll</button>
-            <button className="btn btn-secondary" onClick={() => setShow1099Modal(true)}>Year-End Tax (1099)</button>
-            <button className="btn btn-primary" onClick={() => setShowAddOpModal(true)}>Add Operator</button>
-            <button className="btn btn-secondary" onClick={() => navigate('/admin/rates')}>Operator Rates</button>
-            <button className="btn btn-secondary" onClick={handleLogout}>Logout</button>
-        </div>
+      {/* Top Banner metrics */}
+      <div className="glass-card mb-6 flex justify-between items-center" style={{ padding: '1rem 1.5rem', backgroundColor: 'rgba(30, 41, 59, 0.8)' }}>
+          <div className="flex items-center gap-6">
+             <div>
+                <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Total Pending Payout</div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--status-paid)' }}>${pendingPayoutTotal.toFixed(2)} Ready</div>
+             </div>
+             <div style={{ borderLeft: '1px solid var(--glass-border)', height: '40px' }}></div>
+             <div 
+                style={{ cursor: 'pointer', padding: '0.5rem', borderRadius: '0.5rem', transition: 'background-color 0.2s' }}
+                onClick={() => navigate('/admin/operators')}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+             >
+                <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Active Operators</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{activeOpsCount}</div>
+             </div>
+             <div style={{ borderLeft: '1px solid var(--glass-border)', height: '40px' }}></div>
+             <div>
+                <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Pending Verification</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--status-pending)' }}>{pendingCount}</div>
+             </div>
+          </div>
+          
+          <div className="flex gap-2">
+              <button className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleOpenPayroll}>Run All Payroll</button>
+              <button className="btn btn-secondary" onClick={() => setShow1099Modal(true)}>Year-End Tax (1099)</button>
+              <button className="btn btn-secondary" onClick={() => setShowAddOpModal(true)}>Add Operator</button>
+              <button className="btn btn-secondary" onClick={() => navigate('/admin/operators')}>Manage Operators</button>
+              <button className="btn btn-secondary" onClick={handleLogout}>Logout</button>
+          </div>
       </div>
-      
+
       <div className="glass-card mt-4">
-        <h3>Pending Batches</h3>
+        <h3>Pending Batches (Requires Review)</h3>
         {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
-            <div className="flex flex-col gap-2 mt-4">
-               {batches.filter(b => b.status === 'pending').map(batch => (
-                  <div key={batch.id} className="flex justify-between items-center" style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--glass-border)'}}>
-                      <div>
-                          <div style={{ fontWeight: 600 }}>Operator: {operators[batch.operatorId] || batch.operatorId}</div>
-                          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
-                              {batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'} - {batch.expectedItemCount} boots
-                          </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                          <div style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</div>
-                          <button className="btn btn-secondary" onClick={() => handleViewDocs(batch)}>View Docs</button>
-                      </div>
-                  </div>
-               ))}
-               {batches.filter(b => b.status === 'pending').length === 0 && <p>No pending batches.</p>}
+            <div className="table-container mt-4">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Operator</th>
+                            <th>Date</th>
+                            <th>Items</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {batches.filter(b => b.status === 'pending').map(batch => (
+                            <tr key={batch.id} className="table-row-hover">
+                                <td>{formatOperatorName(batch.operatorId)}</td>
+                                <td>{batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'}</td>
+                                <td><span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>{batch.expectedItemCount} boots</span></td>
+                                <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
+                                <td><span className="badge badge-pending">Pending</span></td>
+                                <td>
+                                    <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)}>Review</button>
+                                </td>
+                            </tr>
+                        ))}
+                        {batches.filter(b => b.status === 'pending').length === 0 && (
+                            <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No pending batches.</td></tr>
+                        )}
+                    </tbody>
+                </table>
             </div>
         )}
       </div>
 
       <div className="glass-card mt-8">
-        <h3>Verified Batches (Ready for Payroll)</h3>
+        <div className="flex justify-between items-center mb-4">
+            <h3>Verified Batches (Ready for Payroll)</h3>
+            <div className="flex gap-4 items-center">
+                <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                    {selectedVerifiedBatches.length} selected
+                </span>
+                <button 
+                    className="btn btn-primary" 
+                    style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)', padding: '0.5rem 1rem', fontSize: '0.875rem'}} 
+                    disabled={selectedVerifiedBatches.length === 0}
+                    onClick={handleOpenSelectedPayroll}
+                >
+                    Pay Selected
+                </button>
+            </div>
+        </div>
         {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
-            <div className="flex flex-col gap-2 mt-4">
-               {batches.filter(b => b.status === 'verified').map(batch => (
-                  <div key={batch.id} className="flex justify-between items-center" style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--glass-border)'}}>
-                      <div>
-                          <div style={{ fontWeight: 600 }}>Operator: {operators[batch.operatorId] || batch.operatorId}</div>
-                          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
-                              {batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'}
-                          </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                          <button className="btn btn-secondary" onClick={() => updateBatchStatus(batch.id, 'pending')}>Undo</button>
-                          <button className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={() => updateBatchStatus(batch.id, 'paid')}>
-                              Pay & Email Stub
-                          </button>
-                      </div>
-                  </div>
-               ))}
-               {batches.filter(b => b.status === 'verified').length === 0 && <p>No verified batches.</p>}
+            <div className="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style={{ width: '40px' }}>
+                                <input 
+                                    type="checkbox" 
+                                    onChange={handleSelectAllVerified} 
+                                    checked={selectedVerifiedBatches.length > 0 && selectedVerifiedBatches.length === batches.filter(b => b.status === 'verified').length}
+                                />
+                            </th>
+                            <th>Operator</th>
+                            <th>Date</th>
+                            <th>Items</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {batches.filter(b => b.status === 'verified').map(batch => (
+                            <tr key={batch.id} className="table-row-hover">
+                                <td>
+                                    <input 
+                                        type="checkbox" 
+                                        checked={selectedVerifiedBatches.includes(batch.id)} 
+                                        onChange={() => toggleSelectVerifiedBatch(batch.id)} 
+                                    />
+                                </td>
+                                <td>{formatOperatorName(batch.operatorId)}</td>
+                                <td>{batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'}</td>
+                                <td><span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>{batch.expectedItemCount} boots</span></td>
+                                <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
+                                <td>
+                                    <div className="flex items-center gap-2">
+                                        <span className="badge badge-verified">Verified</span>
+                                        {batch.reviewNotes && (
+                                            <MessageSquare 
+                                                size={16} 
+                                                style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
+                                                title={batch.reviewNotes}
+                                                onClick={() => alert(`Review Note:\n\n${batch.reviewNotes}`)}
+                                            />
+                                        )}
+                                    </div>
+                                </td>
+                                <td>
+                                    <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }} onClick={() => updateBatchStatus(batch.id, 'pending')}>Hold (Undo)</button>
+                                </td>
+                            </tr>
+                        ))}
+                        {batches.filter(b => b.status === 'verified').length === 0 && (
+                            <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No verified batches.</td></tr>
+                        )}
+                    </tbody>
+                </table>
             </div>
         )}
       </div>
 
       <div className="glass-card mt-8">
-        <h3>Batch History (Paid / Rejected)</h3>
+        <div className="flex justify-between items-center mb-4">
+            <h3>Batch History (Paid / Processing / Rejected)</h3>
+            <div className="flex gap-4">
+                <select 
+                    className="form-input" 
+                    style={{ padding: '0.5rem', width: 'auto', marginBottom: 0 }}
+                    value={historyDateFilter}
+                    onChange={e => setHistoryDateFilter(e.target.value)}
+                >
+                    <option value="all">All Time</option>
+                    <option value="thisWeek">This Week</option>
+                    <option value="lastWeek">Last Week</option>
+                    <option value="thisMonth">This Month</option>
+                </select>
+                <input 
+                    type="text" 
+                    className="form-input" 
+                    style={{ padding: '0.5rem', width: '250px', marginBottom: 0 }} 
+                    placeholder="Search Operator Name..." 
+                    value={historySearchTerm}
+                    onChange={e => setHistorySearchTerm(e.target.value)}
+                />
+            </div>
+        </div>
+        
         {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
-            <div className="flex flex-col gap-2 mt-4">
-               {batches.filter(b => b.status === 'paid' || b.status === 'rejected').map(batch => (
-                  <div key={batch.id} className="flex justify-between items-center" style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--glass-border)'}}>
-                      <div>
-                          <div style={{ fontWeight: 600 }}>Operator: {operators[batch.operatorId] || batch.operatorId}</div>
-                          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
-                              {batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'} - Status: <span style={{textTransform: 'capitalize', color: batch.status === 'rejected' ? 'var(--status-error)' : 'var(--status-paid)'}}>{batch.status}</span>
-                          </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                          <div style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</div>
-                          {batch.status === 'paid' && (
-                              <button className="btn btn-secondary" disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)}>
-                                  {isDownloadingPaystub ? '...' : 'PDF Stub'}
-                              </button>
-                          )}
-                          <button className="btn btn-secondary" onClick={() => handleViewDocs(batch)}>View Docs</button>
-                      </div>
-                  </div>
-               ))}
-               {batches.filter(b => b.status === 'paid' || b.status === 'rejected').length === 0 && <p>No past batches.</p>}
+            <div className="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Operator</th>
+                            <th>Date</th>
+                            <th>Status</th>
+                            <th>Payout</th>
+                            <th>Documents</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {getFilteredHistory().map(batch => (
+                            <tr key={batch.id} className="table-row-hover">
+                                <td>{formatOperatorName(batch.operatorId)}</td>
+                                <td>{batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'}</td>
+                                <td>
+                                    <div className="flex items-center gap-2">
+                                        <span className={`badge badge-${batch.status}`}>
+                                            {batch.status}
+                                        </span>
+                                        {batch.reviewNotes && (
+                                            <MessageSquare 
+                                                size={16} 
+                                                style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
+                                                title={batch.reviewNotes}
+                                                onClick={() => alert(`Review Note:\n\n${batch.reviewNotes}`)}
+                                            />
+                                        )}
+                                    </div>
+                                </td>
+                                <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
+                                <td>
+                                    <div className="flex gap-2">
+                                        {(batch.status === 'paid' || batch.status === 'processing') && (
+                                            <button className="btn btn-secondary" style={{ padding: '0.5rem', fontSize: '0.875rem' }} disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)}>
+                                                {isDownloadingPaystub ? '...' : 'PDF Stub'}
+                                            </button>
+                                        )}
+                                        <button className="btn btn-secondary" style={{ padding: '0.5rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)}>View Docs</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                        {getFilteredHistory().length === 0 && (
+                            <tr><td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No matching batches found.</td></tr>
+                        )}
+                    </tbody>
+                </table>
             </div>
         )}
       </div>
@@ -464,7 +691,7 @@ export default function AdminDashboard() {
                           {payrollSummary.map(op => (
                               <div key={op.operatorId} className="flex justify-between items-center" style={{ padding: '0.5rem 1rem', border: '1px solid var(--glass-border)', borderRadius: '0.5rem', backgroundColor: 'rgba(255,255,255,0.02)' }}>
                                   <div>
-                                      <div style={{ fontWeight: 600 }}>Operator: {operators[op.operatorId] || op.operatorId}</div>
+                                      <div style={{ fontWeight: 600 }}>Operator: {formatOperatorName(op.operatorId)}</div>
                                       <div style={{fontSize:'0.875rem', color: 'var(--text-secondary)'}}>{op.batchIds.length} batches to process</div>
                                   </div>
                                   <div style={{ fontWeight: 600, fontSize: '1.2rem', color: 'var(--status-paid)' }}>${op.total.toFixed(2)}</div>
