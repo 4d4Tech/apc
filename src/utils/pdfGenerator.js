@@ -1,7 +1,6 @@
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
-export const generatePaystubPDF = (data) => {
+export const generatePaystubPDF = async (data) => {
+  const { jsPDF } = await import('jspdf');
+  const { default: autoTable } = await import('jspdf-autotable');
   // Landscape orientation, letter size
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
 

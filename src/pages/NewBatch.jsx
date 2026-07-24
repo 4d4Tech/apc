@@ -11,6 +11,9 @@ export default function NewBatch() {
   const [ticketUrl, setTicketUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
+  const [entryMode, setEntryMode] = useState('ai'); // 'ai' or 'manual'
+  const [manualTotalAmount, setManualTotalAmount] = useState('');
+  const [manualItemCount, setManualItemCount] = useState('');
   const navigate = useNavigate();
   const { userData } = useAuth();
 
@@ -46,16 +49,28 @@ export default function NewBatch() {
   };
 
   const handleCreateBatch = async () => {
-    if (!extractedData) return;
+    let finalData = null;
+    
+    if (entryMode === 'ai' && extractedData) {
+        finalData = extractedData;
+    } else if (entryMode === 'manual' && manualTotalAmount && manualItemCount) {
+        finalData = {
+            batchTotalAmount: parseFloat(manualTotalAmount),
+            expectedItemCount: parseInt(manualItemCount, 10)
+        };
+    }
+
+    if (!finalData) return;
+
     try {
       const batchRef = await addDoc(collection(db, 'batches'), {
         operatorId: auth.currentUser.uid,
         date: serverTimestamp(),
         status: 'pending',
-        batchTicketUrl: ticketUrl,
-        batchTotalAmount: extractedData.batchTotalAmount,
-        expectedItemCount: extractedData.expectedItemCount,
-        calculatedPay: extractedData.expectedItemCount * (userData?.ratePerBoot || 0)
+        batchTicketUrl: ticketUrl || null, // Optional for manual
+        batchTotalAmount: finalData.batchTotalAmount,
+        expectedItemCount: finalData.expectedItemCount,
+        calculatedPay: finalData.expectedItemCount * (userData?.ratePerBoot || 0)
       });
       // Redirect to transaction form/details page for this batch (To be created)
       navigate(`/operator/batch/${batchRef.id}`);
@@ -71,37 +86,95 @@ export default function NewBatch() {
         <button className="btn btn-secondary" onClick={() => navigate('/operator')}>Back</button>
       </div>
 
-      <div className="glass-card mb-4">
-        <h3>1. Upload Daily Batch Ticket</h3>
-        <p className="form-label mb-4">Take a photo of the terminal summary receipt.</p>
-        
-        <div className="form-group flex gap-4 items-center">
-          <input type="file" accept="image/*" onChange={handleFileChange} className="form-input" />
-          <button 
-            className="btn btn-primary" 
-            onClick={handleUploadAndExtract} 
-            disabled={!ticketImage || uploading}
-          >
-            {uploading ? 'Extracting via AI...' : 'Upload & Extract'}
-          </button>
-        </div>
+      <div className="flex gap-4 mb-6">
+        <button 
+          className={`btn ${entryMode === 'ai' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setEntryMode('ai')}
+        >
+          Auto-Extract (AI)
+        </button>
+        <button 
+          className={`btn ${entryMode === 'manual' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setEntryMode('manual')}
+        >
+          Enter Manually
+        </button>
       </div>
 
-      {extractedData && (
+      {entryMode === 'ai' && (
+        <>
+          <div className="glass-card mb-4">
+            <h3>1. Upload Daily Batch Ticket</h3>
+            <p className="form-label mb-4">Take a photo of the terminal summary receipt.</p>
+            
+            <div className="form-group flex gap-4 items-center">
+              <input type="file" accept="image/*" onChange={handleFileChange} className="form-input" />
+              <button 
+                className="btn btn-primary" 
+                onClick={handleUploadAndExtract} 
+                disabled={!ticketImage || uploading}
+              >
+                {uploading ? 'Extracting via AI...' : 'Upload & Extract'}
+              </button>
+            </div>
+          </div>
+
+          {extractedData && (
+            <div className="glass-card mb-4">
+              <h3>2. AI Extracted Data</h3>
+              <div className="flex gap-4 mt-4">
+                 <div>
+                   <div className="form-label">Total Amount</div>
+                   <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>${extractedData.batchTotalAmount.toFixed(2)}</div>
+                 </div>
+                 <div>
+                   <div className="form-label">Expected Boots</div>
+                   <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{extractedData.expectedItemCount}</div>
+                 </div>
+              </div>
+              
+              <button className="btn btn-primary mt-4" onClick={handleCreateBatch} style={{ width: '100%' }}>
+                Confirm & Add Vehicles
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {entryMode === 'manual' && (
         <div className="glass-card mb-4">
-          <h3>2. AI Extracted Data</h3>
-          <div className="flex gap-4 mt-4">
-             <div>
-               <div className="form-label">Total Amount</div>
-               <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>${extractedData.batchTotalAmount.toFixed(2)}</div>
-             </div>
-             <div>
-               <div className="form-label">Expected Boots</div>
-               <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{extractedData.expectedItemCount}</div>
-             </div>
+          <h3>Manual Data Entry</h3>
+          <p className="form-label mb-4">Enter the totals from your terminal summary receipt.</p>
+          
+          <div className="form-group">
+            <label className="form-label">Total Amount Collected ($)</label>
+            <input 
+              type="number" 
+              step="0.01" 
+              className="form-input" 
+              value={manualTotalAmount}
+              onChange={(e) => setManualTotalAmount(e.target.value)}
+              placeholder="e.g. 150.00"
+            />
           </div>
           
-          <button className="btn btn-primary mt-4" onClick={handleCreateBatch} style={{ width: '100%' }}>
+          <div className="form-group">
+            <label className="form-label">Expected Boot Count</label>
+            <input 
+              type="number" 
+              className="form-input" 
+              value={manualItemCount}
+              onChange={(e) => setManualItemCount(e.target.value)}
+              placeholder="e.g. 3"
+            />
+          </div>
+
+          <button 
+            className="btn btn-primary mt-4" 
+            onClick={handleCreateBatch} 
+            disabled={!manualTotalAmount || !manualItemCount}
+            style={{ width: '100%' }}
+          >
             Confirm & Add Vehicles
           </button>
         </div>

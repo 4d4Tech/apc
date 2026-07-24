@@ -7,6 +7,13 @@ import { signOut } from 'firebase/auth';
 import { generatePaystubPDF } from '../utils/pdfGenerator';
 import { MessageSquare } from 'lucide-react';
 
+const getSafeDate = (d) => {
+    if (!d) return null;
+    if (typeof d.toDate === 'function') return d.toDate();
+    if (d.seconds) return new Date(d.seconds * 1000);
+    return new Date(d);
+};
+
 export default function AdminDashboard() {
   const [batches, setBatches] = useState([]);
   const [operators, setOperators] = useState({});
@@ -96,18 +103,23 @@ export default function AdminDashboard() {
   };
 
   const updateBatchStatus = async (batchId, status, notes = '') => {
+    // Optimistic UI update
+    setBatches(prev => prev.map(b => b.id === batchId ? { ...b, status, reviewNotes: notes } : b));
+    if (selectedBatch?.id === batchId) {
+        if (status === 'verified' || status === 'rejected') {
+            handleCloseModal();
+        } else {
+            setSelectedBatch({...selectedBatch, status, reviewNotes: notes});
+        }
+    }
+
     try {
       await updateDoc(doc(db, 'batches', batchId), { status, reviewNotes: notes });
       fetchBatches();
-      if (selectedBatch?.id === batchId) {
-          if (status === 'verified' || status === 'rejected') {
-              handleCloseModal();
-          } else {
-              setSelectedBatch({...selectedBatch, status, reviewNotes: notes});
-          }
-      }
     } catch (err) {
-      console.error(err);
+      console.error("Error updating batch status:", err);
+      // Revert optimism on failure
+      fetchBatches();
     }
   };
 
@@ -243,7 +255,7 @@ export default function AdminDashboard() {
           const genPaystubFn = httpsCallable(functions, 'generatepaystub');
           const res = await genPaystubFn({ batchId });
           if (res.data.success) {
-              const pdfData = generatePaystubPDF(res.data.data);
+              const pdfData = await generatePaystubPDF(res.data.data);
               setPaystubPdfData(pdfData);
           } else {
               alert("Failed to fetch paystub data.");
@@ -286,7 +298,8 @@ export default function AdminDashboard() {
       if (historyDateFilter !== 'all') {
           filtered = filtered.filter(b => {
               if (!b.date) return false;
-              const batchDate = b.date.toDate();
+              const batchDate = getSafeDate(b.date);
+              if (!batchDate) return false;
               const now = new Date();
               
               if (historyDateFilter === 'thisWeek') {
@@ -316,456 +329,466 @@ export default function AdminDashboard() {
   const pendingCount = batches.filter(b => b.status === 'pending').length;
 
   return (
-    <div className="container mt-8">
-      {/* Top Banner metrics */}
-      <div className="glass-card mb-6 flex justify-between items-center" style={{ padding: '1rem 1.5rem', backgroundColor: 'rgba(30, 41, 59, 0.8)' }}>
-          <div className="flex items-center gap-6">
-             <div>
-                <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Total Pending Payout</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--status-paid)' }}>${pendingPayoutTotal.toFixed(2)} Ready</div>
-             </div>
-             <div style={{ borderLeft: '1px solid var(--glass-border)', height: '40px' }}></div>
-             <div 
-                style={{ cursor: 'pointer', padding: '0.5rem', borderRadius: '0.5rem', transition: 'background-color 0.2s' }}
-                onClick={() => navigate('/admin/operators')}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-             >
-                <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Active Operators</div>
-                <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{activeOpsCount}</div>
-             </div>
-             <div style={{ borderLeft: '1px solid var(--glass-border)', height: '40px' }}></div>
-             <div>
-                <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Pending Verification</div>
-                <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--status-pending)' }}>{pendingCount}</div>
-             </div>
-          </div>
-          
-          <div className="flex gap-2">
-              <button className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleOpenPayroll}>Run All Payroll</button>
-              <button className="btn btn-secondary" onClick={() => setShow1099Modal(true)}>Year-End Tax (1099)</button>
-              <button className="btn btn-secondary" onClick={() => setShowAddOpModal(true)}>Add Operator</button>
-              <button className="btn btn-secondary" onClick={() => navigate('/admin/operators')}>Manage Operators</button>
-              <button className="btn btn-secondary" onClick={handleLogout}>Logout</button>
-          </div>
-      </div>
-
-      <div className="glass-card mt-4">
-        <h3>Pending Batches (Requires Review)</h3>
-        {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
-            <div className="table-container mt-4">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Operator</th>
-                            <th>Date</th>
-                            <th>Items</th>
-                            <th>Amount</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {batches.filter(b => b.status === 'pending').map(batch => (
-                            <tr key={batch.id} className="table-row-hover">
-                                <td>{formatOperatorName(batch.operatorId)}</td>
-                                <td>{batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'}</td>
-                                <td><span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>{batch.expectedItemCount} boots</span></td>
-                                <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
-                                <td><span className="badge badge-pending">Pending</span></td>
-                                <td>
-                                    <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)}>Review</button>
-                                </td>
-                            </tr>
-                        ))}
-                        {batches.filter(b => b.status === 'pending').length === 0 && (
-                            <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No pending batches.</td></tr>
-                        )}
-                    </tbody>
-                </table>
+    <div style={{
+      minHeight: '100vh',
+      backgroundImage: 'url(/admin-bg.jpg)',
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundAttachment: 'fixed',
+      paddingTop: '2rem',
+      paddingBottom: '2rem'
+    }}>
+      <div className="container">
+        {/* Top Banner metrics */}
+        <div className="glass-card mb-6 flex justify-between items-center" style={{ padding: '1rem 1.5rem', backgroundColor: 'rgba(30, 41, 59, 0.8)' }}>
+            <div className="flex items-center gap-6">
+               <div>
+                  <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Total Pending Payout</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--status-paid)' }}>${pendingPayoutTotal.toFixed(2)} Ready</div>
+               </div>
+               <div style={{ borderLeft: '1px solid var(--glass-border)', height: '40px' }}></div>
+               <div 
+                  style={{ cursor: 'pointer', padding: '0.5rem', borderRadius: '0.5rem', transition: 'background-color 0.2s' }}
+                  onClick={() => navigate('/admin/operators')}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+               >
+                  <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Active Operators</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{activeOpsCount}</div>
+               </div>
+               <div style={{ borderLeft: '1px solid var(--glass-border)', height: '40px' }}></div>
+               <div>
+                  <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Pending Verification</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--status-pending)' }}>{pendingCount}</div>
+               </div>
             </div>
-        )}
-      </div>
-
-      <div className="glass-card mt-8">
-        <div className="flex justify-between items-center mb-4">
-            <h3>Verified Batches (Ready for Payroll)</h3>
-            <div className="flex gap-4 items-center">
-                <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                    {selectedVerifiedBatches.length} selected
-                </span>
-                <button 
-                    className="btn btn-primary" 
-                    style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)', padding: '0.5rem 1rem', fontSize: '0.875rem'}} 
-                    disabled={selectedVerifiedBatches.length === 0}
-                    onClick={handleOpenSelectedPayroll}
-                >
-                    Pay Selected
-                </button>
+            
+            <div className="flex gap-2">
+                <button className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleOpenPayroll}>Run All Payroll</button>
+                <button className="btn btn-secondary" onClick={() => setShow1099Modal(true)}>Year-End Tax (1099)</button>
+                <button className="btn btn-secondary" onClick={() => setShowAddOpModal(true)}>Add Operator</button>
+                <button className="btn btn-secondary" onClick={() => navigate('/admin/operators')}>Manage Operators</button>
+                <button className="btn btn-secondary" onClick={handleLogout}>Logout</button>
             </div>
         </div>
-        {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
-            <div className="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th style={{ width: '40px' }}>
-                                <input 
-                                    type="checkbox" 
-                                    onChange={handleSelectAllVerified} 
-                                    checked={selectedVerifiedBatches.length > 0 && selectedVerifiedBatches.length === batches.filter(b => b.status === 'verified').length}
-                                />
-                            </th>
-                            <th>Operator</th>
-                            <th>Date</th>
-                            <th>Items</th>
-                            <th>Amount</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {batches.filter(b => b.status === 'verified').map(batch => (
-                            <tr key={batch.id} className="table-row-hover">
-                                <td>
-                                    <input 
-                                        type="checkbox" 
-                                        checked={selectedVerifiedBatches.includes(batch.id)} 
-                                        onChange={() => toggleSelectVerifiedBatch(batch.id)} 
-                                    />
-                                </td>
-                                <td>{formatOperatorName(batch.operatorId)}</td>
-                                <td>{batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'}</td>
-                                <td><span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>{batch.expectedItemCount} boots</span></td>
-                                <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
-                                <td>
-                                    <div className="flex items-center gap-2">
-                                        <span className="badge badge-verified">Verified</span>
-                                        {batch.reviewNotes && (
-                                            <MessageSquare 
-                                                size={16} 
-                                                style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
-                                                title={batch.reviewNotes}
-                                                onClick={() => alert(`Review Note:\n\n${batch.reviewNotes}`)}
-                                            />
-                                        )}
-                                    </div>
-                                </td>
-                                <td>
-                                    <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }} onClick={() => updateBatchStatus(batch.id, 'pending')}>Hold (Undo)</button>
-                                </td>
-                            </tr>
-                        ))}
-                        {batches.filter(b => b.status === 'verified').length === 0 && (
-                            <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No verified batches.</td></tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-        )}
-      </div>
-
-      <div className="glass-card mt-8">
-        <div className="flex justify-between items-center mb-4">
-            <h3>Batch History (Paid / Processing / Rejected)</h3>
-            <div className="flex gap-4">
-                <select 
-                    className="form-input" 
-                    style={{ padding: '0.5rem', width: 'auto', marginBottom: 0 }}
-                    value={historyDateFilter}
-                    onChange={e => setHistoryDateFilter(e.target.value)}
-                >
-                    <option value="all">All Time</option>
-                    <option value="thisWeek">This Week</option>
-                    <option value="lastWeek">Last Week</option>
-                    <option value="thisMonth">This Month</option>
-                </select>
-                <input 
-                    type="text" 
-                    className="form-input" 
-                    style={{ padding: '0.5rem', width: '250px', marginBottom: 0 }} 
-                    placeholder="Search Operator Name..." 
-                    value={historySearchTerm}
-                    onChange={e => setHistorySearchTerm(e.target.value)}
-                />
-            </div>
-        </div>
-        
-        {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
-            <div className="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Operator</th>
-                            <th>Date</th>
-                            <th>Status</th>
-                            <th>Payout</th>
-                            <th>Documents</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {getFilteredHistory().map(batch => (
-                            <tr key={batch.id} className="table-row-hover">
-                                <td>{formatOperatorName(batch.operatorId)}</td>
-                                <td>{batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'}</td>
-                                <td>
-                                    <div className="flex items-center gap-2">
-                                        <span className={`badge badge-${batch.status}`}>
-                                            {batch.status}
-                                        </span>
-                                        {batch.reviewNotes && (
-                                            <MessageSquare 
-                                                size={16} 
-                                                style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
-                                                title={batch.reviewNotes}
-                                                onClick={() => alert(`Review Note:\n\n${batch.reviewNotes}`)}
-                                            />
-                                        )}
-                                    </div>
-                                </td>
-                                <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
-                                <td>
-                                    <div className="flex gap-2">
-                                        {(batch.status === 'paid' || batch.status === 'processing') && (
-                                            <button className="btn btn-secondary" style={{ padding: '0.5rem', fontSize: '0.875rem' }} disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)}>
-                                                {isDownloadingPaystub ? '...' : 'PDF Stub'}
-                                            </button>
-                                        )}
-                                        <button className="btn btn-secondary" style={{ padding: '0.5rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)}>View Docs</button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                        {getFilteredHistory().length === 0 && (
-                            <tr><td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No matching batches found.</td></tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-        )}
-      </div>
-
-      {/* Review Modal */}
-      {selectedBatch && (
-          <div className="modal-overlay">
-              <div className="modal-content glass-card">
-                  <button className="modal-close" onClick={handleCloseModal}>X</button>
-                  <h3 className="mb-4">Review Batch</h3>
-                  
-                  <div className="flex gap-4">
-                      <div style={{ flex: 1 }}>
-                          <h4 className="mb-2">Daily Summary Ticket</h4>
-                          <img src={selectedBatch.batchTicketUrl} alt="Batch Ticket" style={{ width: '100%', borderRadius: '0.5rem' }}/>
-                      </div>
-                      <div style={{ flex: 1, maxHeight: '60vh', overflowY: 'auto' }}>
-                          <h4 className="mb-2">Transactions ({txDetails.length})</h4>
-                          {txDetails.map((tx, idx) => (
-                              <div key={idx} className="glass-card mb-2" style={{ padding: '1rem' }}>
-                                  <div className="flex justify-between mb-2">
-                                      <div>{tx.licensePlate}</div>
-                                      <div>${tx.amountPaid} (*{tx.cardLast4})</div>
-                                  </div>
-                                  <div className="flex gap-2">
-                                      <a href={tx.photos.vehicle} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Vehicle</a>
-                                      <a href={tx.photos.receipt} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Receipt</a>
-                                      <a href={tx.photos.release} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Release</a>
-                                  </div>
-                              </div>
+  
+        <div className="glass-card mt-4">
+          <h3>Pending Batches (Requires Review)</h3>
+          {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
+              <div className="table-container mt-4">
+                  <table>
+                      <thead>
+                          <tr>
+                              <th>Operator</th>
+                              <th>Date</th>
+                              <th>Items</th>
+                              <th>Amount</th>
+                              <th>Status</th>
+                              <th>Actions</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {batches.filter(b => b.status === 'pending').map(batch => (
+                              <tr key={batch.id} className="table-row-hover">
+                                  <td>{formatOperatorName(batch.operatorId)}</td>
+                                  <td>{batch.date ? getSafeDate(batch.date).toLocaleDateString() : 'N/A'}</td>
+                                  <td><span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>{batch.expectedItemCount} boots</span></td>
+                                  <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
+                                  <td><span className="badge badge-pending">Pending</span></td>
+                                  <td>
+                                      <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)}>Review</button>
+                                  </td>
+                              </tr>
                           ))}
-                          
-                          <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
-                              <h4 className="mb-2">Adjustments (Deductions/Reimbursements)</h4>
-                              {selectedBatch.adjustments?.map((adj, idx) => (
-                                  <div key={idx} className="flex justify-between items-center mb-2" style={{ padding: '0.5rem', border: '1px solid var(--glass-border)', borderRadius: '0.25rem' }}>
-                                      <div>
-                                          <span style={{color: adj.type === 'deduction' ? 'var(--status-error)' : 'var(--status-paid)', fontWeight: 600, marginRight: '0.5rem'}}>{adj.type === 'deduction' ? '-' : '+'}</span>
-                                          {adj.description}
-                                      </div>
+                          {batches.filter(b => b.status === 'pending').length === 0 && (
+                              <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No pending batches.</td></tr>
+                          )}
+                      </tbody>
+                  </table>
+              </div>
+          )}
+        </div>
+  
+        <div className="glass-card mt-8">
+          <div className="flex justify-between items-center mb-4">
+              <h3>Verified Batches (Ready for Payroll)</h3>
+              <div className="flex gap-4 items-center">
+                  <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      {selectedVerifiedBatches.length} selected
+                  </span>
+                  <button 
+                      className="btn btn-primary" 
+                      style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)', padding: '0.5rem 1rem', fontSize: '0.875rem'}} 
+                      disabled={selectedVerifiedBatches.length === 0}
+                      onClick={handleOpenSelectedPayroll}
+                  >
+                      Pay Selected
+                  </button>
+              </div>
+          </div>
+          {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
+              <div className="table-container">
+                  <table>
+                      <thead>
+                          <tr>
+                              <th style={{ width: '40px' }}>
+                                  <input 
+                                      type="checkbox" 
+                                      onChange={handleSelectAllVerified} 
+                                      checked={selectedVerifiedBatches.length > 0 && selectedVerifiedBatches.length === batches.filter(b => b.status === 'verified').length}
+                                  />
+                              </th>
+                              <th>Operator</th>
+                              <th>Date</th>
+                              <th>Items</th>
+                              <th>Amount</th>
+                              <th>Status</th>
+                              <th>Actions</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {batches.filter(b => b.status === 'verified').map(batch => (
+                              <tr key={batch.id} className="table-row-hover">
+                                  <td>
+                                      <input 
+                                          type="checkbox" 
+                                          checked={selectedVerifiedBatches.includes(batch.id)} 
+                                          onChange={() => toggleSelectVerifiedBatch(batch.id)} 
+                                      />
+                                  </td>
+                                  <td>{formatOperatorName(batch.operatorId)}</td>
+                                  <td>{batch.date ? getSafeDate(batch.date).toLocaleDateString() : 'N/A'}</td>
+                                  <td><span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>{batch.expectedItemCount} boots</span></td>
+                                  <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
+                                  <td>
                                       <div className="flex items-center gap-2">
-                                          <span>${adj.amount.toFixed(2)}</span>
-                                          {(selectedBatch.status === 'pending' || selectedBatch.status === 'verified') && (
-                                              <button onClick={() => handleRemoveAdjustment(idx)} style={{color: 'var(--status-error)', cursor: 'pointer', background:'none', border:'none'}}>X</button>
+                                          <span className="badge badge-verified">Verified</span>
+                                          {batch.reviewNotes && (
+                                              <MessageSquare 
+                                                  size={16} 
+                                                  style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
+                                                  title={batch.reviewNotes}
+                                                  onClick={() => alert(`Review Note:\n\n${batch.reviewNotes}`)}
+                                              />
                                           )}
                                       </div>
-                                  </div>
-                              ))}
-                              
-                              {(selectedBatch.status === 'pending' || selectedBatch.status === 'verified') && (
-                                  <form onSubmit={handleAddAdjustment} className="flex gap-2 mt-2">
-                                      <select className="form-input" style={{width: 'auto', padding: '0.5rem'}} value={adjType} onChange={e => setAdjType(e.target.value)}>
-                                          <option value="deduction">Deduct</option>
-                                          <option value="reimbursement">Reimburse</option>
-                                      </select>
-                                      <input type="text" className="form-input" placeholder="Desc" required value={adjDesc} onChange={e => setAdjDesc(e.target.value)} />
-                                      <input type="number" step="0.01" className="form-input" placeholder="$0.00" style={{width: '80px'}} required value={adjAmount} onChange={e => setAdjAmount(e.target.value)} />
-                                      <button type="submit" className="btn btn-secondary" style={{padding: '0.5rem 1rem'}}>Add</button>
-                                  </form>
-                              )}
-                          </div>
-                      </div>
-                  </div>
-
-                  <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
-                      {selectedBatch.status === 'pending' && (
-                          <div className="mb-4">
-                              <label className="form-label">Review Notes (Optional)</label>
-                              <textarea className="form-input" rows="2" value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="E.g., Missing receipt photo..."></textarea>
-                          </div>
-                      )}
-                      
-                      <div className="flex justify-end gap-4">
-                          <button className="btn btn-secondary" onClick={handleCloseModal}>Cancel</button>
-                          {selectedBatch.status === 'pending' && (
-                              <>
-                                  <button className="btn btn-secondary" style={{color: 'var(--status-error)', borderColor: 'var(--status-error)'}} onClick={() => updateBatchStatus(selectedBatch.id, 'rejected', reviewNotes)}>
-                                      Reject Batch
-                                  </button>
-                                  <button className="btn btn-primary" onClick={() => updateBatchStatus(selectedBatch.id, 'verified', reviewNotes)}>
-                                      Verify Batch
-                                  </button>
-                              </>
-                          )}
-                      </div>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* Add Operator Modal */}
-      {showAddOpModal && (
-          <div className="modal-overlay">
-              <div className="modal-content glass-card" style={{ maxWidth: '450px' }}>
-                  <button className="modal-close" onClick={() => setShowAddOpModal(false)}>X</button>
-                  <h3 className="mb-4">Add Boot Operator</h3>
-                  {addOpError && <div style={{ color: 'var(--status-error)', marginBottom: '1rem' }}>{addOpError}</div>}
-                  <form onSubmit={handleAddOperator}>
-                      <div className="flex gap-4">
-                          <div className="form-group" style={{ flex: 1 }}>
-                              <label className="form-label">First Name</label>
-                              <input type="text" className="form-input" required
-                                  value={newOpData.firstName} onChange={e => setNewOpData({...newOpData, firstName: e.target.value})} />
-                          </div>
-                          <div className="form-group" style={{ flex: 1 }}>
-                              <label className="form-label">Last Name</label>
-                              <input type="text" className="form-input" required
-                                  value={newOpData.lastName} onChange={e => setNewOpData({...newOpData, lastName: e.target.value})} />
-                          </div>
-                      </div>
-                      <div className="form-group">
-                          <label className="form-label">Phone Number</label>
-                          <input type="tel" className="form-input" required
-                              value={newOpData.phone} onChange={e => setNewOpData({...newOpData, phone: e.target.value})} />
-                      </div>
-                      <div className="form-group">
-                          <label className="form-label">Email</label>
-                          <input type="email" className="form-input" required
-                              value={newOpData.email} onChange={e => setNewOpData({...newOpData, email: e.target.value})} />
-                      </div>
-                      <div className="form-group">
-                          <label className="form-label">Password</label>
-                          <input type="text" className="form-input" required minLength={6}
-                              value={newOpData.password} onChange={e => setNewOpData({...newOpData, password: e.target.value})} />
-                      </div>
-                      <div className="flex justify-end gap-4 mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
-                          <button type="button" className="btn btn-secondary" onClick={() => setShowAddOpModal(false)}>Cancel</button>
-                          <button type="submit" className="btn btn-primary" disabled={isAddingOp}>
-                              {isAddingOp ? 'Adding...' : 'Add Operator'}
-                          </button>
-                      </div>
-                  </form>
-              </div>
-          </div>
-      )}
-
-      {/* Payroll Modal */}
-      {showPayrollModal && (
-          <div className="modal-overlay">
-              <div className="modal-content glass-card" style={{ maxWidth: '600px' }}>
-                  <button className="modal-close" onClick={() => setShowPayrollModal(false)}>X</button>
-                  <h3 className="mb-4">Run Payroll Summary</h3>
-                  
-                  {payrollSummary.length === 0 ? (
-                      <p>No verified batches ready for payroll.</p>
-                  ) : (
-                      <div className="flex flex-col gap-2">
-                          {payrollSummary.map(op => (
-                              <div key={op.operatorId} className="flex justify-between items-center" style={{ padding: '0.5rem 1rem', border: '1px solid var(--glass-border)', borderRadius: '0.5rem', backgroundColor: 'rgba(255,255,255,0.02)' }}>
-                                  <div>
-                                      <div style={{ fontWeight: 600 }}>Operator: {formatOperatorName(op.operatorId)}</div>
-                                      <div style={{fontSize:'0.875rem', color: 'var(--text-secondary)'}}>{op.batchIds.length} batches to process</div>
-                                  </div>
-                                  <div style={{ fontWeight: 600, fontSize: '1.2rem', color: 'var(--status-paid)' }}>${op.total.toFixed(2)}</div>
-                              </div>
+                                  </td>
+                                  <td>
+                                      <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }} onClick={() => updateBatchStatus(batch.id, 'pending')}>Hold (Undo)</button>
+                                  </td>
+                              </tr>
                           ))}
-                      </div>
-                  )}
-
-                  <div className="flex justify-end gap-4 mt-6 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
-                      <button className="btn btn-secondary" onClick={() => setShowPayrollModal(false)}>Cancel</button>
-                      <button className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleRunPayroll} disabled={isProcessingPayroll || payrollSummary.length === 0}>
-                          {isProcessingPayroll ? 'Processing...' : 'Confirm & Run ACH Transfers'}
-                      </button>
-                  </div>
+                          {batches.filter(b => b.status === 'verified').length === 0 && (
+                              <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No verified batches.</td></tr>
+                          )}
+                      </tbody>
+                  </table>
+              </div>
+          )}
+        </div>
+  
+        <div className="glass-card mt-8">
+          <div className="flex justify-between items-center mb-4">
+              <h3>Batch History (Paid / Processing / Rejected)</h3>
+              <div className="flex gap-4">
+                  <select 
+                      className="form-input" 
+                      style={{ padding: '0.5rem', width: 'auto', marginBottom: 0 }}
+                      value={historyDateFilter}
+                      onChange={e => setHistoryDateFilter(e.target.value)}
+                  >
+                      <option value="all">All Time</option>
+                      <option value="thisWeek">This Week</option>
+                      <option value="lastWeek">Last Week</option>
+                      <option value="thisMonth">This Month</option>
+                  </select>
+                  <input 
+                      type="text" 
+                      className="form-input" 
+                      style={{ padding: '0.5rem', width: '250px', marginBottom: 0 }} 
+                      placeholder="Search Operator Name..." 
+                      value={historySearchTerm}
+                      onChange={e => setHistorySearchTerm(e.target.value)}
+                  />
               </div>
           </div>
-      )}
-
-      {/* 1099 Modal */}
-      {show1099Modal && (
-          <div className="modal-overlay">
-              <div className="modal-content glass-card" style={{ maxWidth: '600px', maxHeight: '80vh', overflowY: 'auto' }}>
-                  <button className="modal-close" onClick={() => setShow1099Modal(false)}>X</button>
-                  <h3 className="mb-4">Generate 1099s</h3>
-                  
-                  <form onSubmit={handleGenerate1099} className="flex gap-4 items-end mb-4">
-                      <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label className="form-label">Tax Year</label>
-                          <input type="number" className="form-input" required value={year1099} onChange={e => setYear1099(e.target.value)} />
-                      </div>
-                      <button type="submit" className="btn btn-primary" disabled={isGenerating1099}>
-                          {isGenerating1099 ? 'Generating...' : 'Run Generation'}
-                      </button>
-                  </form>
-                  
-                  {taxResults && (
-                      <div className="mt-4">
-                          <h4 style={{marginBottom: '0.5rem'}}>Results for {year1099}</h4>
-                          <p style={{marginBottom: '1rem', fontSize: '0.875rem', color: 'var(--text-secondary)'}}>Found {taxResults.length} operators with $600+ YTD earnings.</p>
-                          
-                          <div className="flex flex-col gap-2">
-                              {taxResults.map(r => (
-                                  <div key={r.operatorId} className="glass-card" style={{ padding: '0.75rem', backgroundColor: 'rgba(255,255,255,0.02)' }}>
-                                      <div className="flex justify-between" style={{fontWeight: 600}}>
-                                          <span>{r.name}</span>
-                                          <span style={{color: 'var(--status-paid)'}}>${r.ytdTotal.toFixed(2)}</span>
+          
+          {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
+              <div className="table-container">
+                  <table>
+                      <thead>
+                          <tr>
+                              <th>Operator</th>
+                              <th>Date</th>
+                              <th>Status</th>
+                              <th>Payout</th>
+                              <th>Documents</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {getFilteredHistory().map(batch => (
+                              <tr key={batch.id} className="table-row-hover">
+                                  <td>{formatOperatorName(batch.operatorId)}</td>
+                                  <td>{batch.date ? getSafeDate(batch.date).toLocaleDateString() : 'N/A'}</td>
+                                  <td>
+                                      <div className="flex items-center gap-2">
+                                          <span className={`badge badge-${batch.status}`}>
+                                              {batch.status}
+                                          </span>
+                                          {batch.reviewNotes && (
+                                              <MessageSquare 
+                                                  size={16} 
+                                                  style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
+                                                  title={batch.reviewNotes}
+                                                  onClick={() => alert(`Review Note:\n\n${batch.reviewNotes}`)}
+                                              />
+                                          )}
                                       </div>
-                                      <div style={{fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
-                                          {r.email} | SSN/EIN: {r.ssnOrEin}
+                                  </td>
+                                  <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
+                                  <td>
+                                      <div className="flex gap-2">
+                                          {(batch.status === 'paid' || batch.status === 'processing') && (
+                                              <button className="btn btn-secondary" style={{ padding: '0.5rem', fontSize: '0.875rem' }} disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)}>
+                                                  {isDownloadingPaystub ? '...' : 'PDF Stub'}
+                                              </button>
+                                          )}
+                                          <button className="btn btn-secondary" style={{ padding: '0.5rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)}>View Docs</button>
                                       </div>
-                                  </div>
-                              ))}
-                              {taxResults.length === 0 && <p>No operators met the $600 threshold.</p>}
-                          </div>
-                      </div>
-                  )}
+                                  </td>
+                              </tr>
+                          ))}
+                          {getFilteredHistory().length === 0 && (
+                              <tr><td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No matching batches found.</td></tr>
+                          )}
+                      </tbody>
+                  </table>
               </div>
-          </div>
-      )}
-
-      {paystubPdfData && (
-          <div className="modal-overlay" onClick={() => setPaystubPdfData(null)}>
-              <div className="modal-content" onClick={e => e.stopPropagation()} style={{ width: '90%', maxWidth: '800px', height: '85vh', display: 'flex', flexDirection: 'column' }}>
-                  <div className="flex justify-between items-center mb-4">
-                      <h3>Paystub Preview</h3>
-                      <div className="flex gap-4">
-                          <a href={paystubPdfData.url} download={paystubPdfData.filename} className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)', textDecoration: 'none', display: 'flex', alignItems: 'center'}}>Download PDF</a>
-                          <button className="btn btn-secondary" onClick={() => setPaystubPdfData(null)}>Close</button>
-                      </div>
-                  </div>
-                  <iframe src={paystubPdfData.url} style={{ width: '100%', flex: 1, border: 'none', borderRadius: '8px', backgroundColor: '#fff' }} title="Paystub Preview"></iframe>
-              </div>
-          </div>
-      )}
+          )}
+        </div>
+  
+        {/* Review Modal */}
+        {selectedBatch && (
+            <div className="modal-overlay">
+                <div className="modal-content glass-card">
+                    <button className="modal-close" onClick={handleCloseModal}>X</button>
+                    <h3 className="mb-4">Review Batch</h3>
+                    
+                    <div className="flex gap-4">
+                        <div style={{ flex: 1 }}>
+                            <h4 className="mb-2">Daily Summary Ticket</h4>
+                            <img src={selectedBatch.batchTicketUrl} alt="Batch Ticket" style={{ width: '100%', borderRadius: '0.5rem' }}/>
+                        </div>
+                        <div style={{ flex: 1, maxHeight: '60vh', overflowY: 'auto' }}>
+                            <h4 className="mb-2">Transactions ({txDetails.length})</h4>
+                            {txDetails.map((tx, idx) => (
+                                <div key={idx} className="glass-card mb-2" style={{ padding: '1rem' }}>
+                                    <div className="flex justify-between mb-2">
+                                        <div>{tx.licensePlate}</div>
+                                        <div>${tx.amountPaid} (*{tx.cardLast4})</div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <a href={tx.photos.vehicle} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Vehicle</a>
+                                        <a href={tx.photos.receipt} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Receipt</a>
+                                        <a href={tx.photos.release} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Release</a>
+                                    </div>
+                                </div>
+                            ))}
+                            
+                            <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                                <h4 className="mb-2">Adjustments (Deductions/Reimbursements)</h4>
+                                {selectedBatch.adjustments?.map((adj, idx) => (
+                                    <div key={idx} className="flex justify-between items-center mb-2" style={{ padding: '0.5rem', border: '1px solid var(--glass-border)', borderRadius: '0.25rem' }}>
+                                        <div>
+                                            <span style={{color: adj.type === 'deduction' ? 'var(--status-error)' : 'var(--status-paid)', fontWeight: 600, marginRight: '0.5rem'}}>{adj.type === 'deduction' ? '-' : '+'}</span>
+                                            {adj.description}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span>${adj.amount.toFixed(2)}</span>
+                                            {(selectedBatch.status === 'pending' || selectedBatch.status === 'verified') && (
+                                                <button onClick={() => handleRemoveAdjustment(idx)} style={{color: 'var(--status-error)', cursor: 'pointer', background:'none', border:'none'}}>X</button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                                
+                                {(selectedBatch.status === 'pending' || selectedBatch.status === 'verified') && (
+                                    <form onSubmit={handleAddAdjustment} className="flex gap-2 mt-2">
+                                        <select className="form-input" style={{width: 'auto', padding: '0.5rem'}} value={adjType} onChange={e => setAdjType(e.target.value)}>
+                                            <option value="deduction">Deduct</option>
+                                            <option value="reimbursement">Reimburse</option>
+                                        </select>
+                                        <input type="text" className="form-input" placeholder="Desc" required value={adjDesc} onChange={e => setAdjDesc(e.target.value)} />
+                                        <input type="number" step="0.01" className="form-input" placeholder="$0.00" style={{width: '80px'}} required value={adjAmount} onChange={e => setAdjAmount(e.target.value)} />
+                                        <button type="submit" className="btn btn-secondary" style={{padding: '0.5rem 1rem'}}>Add</button>
+                                    </form>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+  
+                    <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                        {selectedBatch.status === 'pending' && (
+                            <div className="mb-4">
+                                <label className="form-label">Review Notes (Optional)</label>
+                                <textarea className="form-input" rows="2" value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="E.g., Missing receipt photo..."></textarea>
+                            </div>
+                        )}
+                        
+                        <div className="flex justify-end gap-4">
+                            <button className="btn btn-secondary" onClick={handleCloseModal}>Cancel</button>
+                            {selectedBatch.status === 'pending' && (
+                                <>
+                                    <button className="btn btn-secondary" style={{color: 'var(--status-error)', borderColor: 'var(--status-error)'}} onClick={() => updateBatchStatus(selectedBatch.id, 'rejected', reviewNotes)}>
+                                        Reject Batch
+                                    </button>
+                                    <button className="btn btn-primary" onClick={() => updateBatchStatus(selectedBatch.id, 'verified', reviewNotes)}>
+                                        Verify Batch
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+  
+        {/* Add Operator Modal */}
+        {showAddOpModal && (
+            <div className="modal-overlay">
+                <div className="modal-content glass-card" style={{ maxWidth: '450px' }}>
+                    <button className="modal-close" onClick={() => setShowAddOpModal(false)}>X</button>
+                    <h3 className="mb-4">Add Boot Operator</h3>
+                    {addOpError && <div style={{ color: 'var(--status-error)', marginBottom: '1rem' }}>{addOpError}</div>}
+                    <form onSubmit={handleAddOperator}>
+                        <div className="flex gap-4">
+                            <div className="form-group" style={{ flex: 1 }}>
+                                <label className="form-label">First Name</label>
+                                <input type="text" className="form-input" required
+                                    value={newOpData.firstName} onChange={e => setNewOpData({...newOpData, firstName: e.target.value})} />
+                            </div>
+                            <div className="form-group" style={{ flex: 1 }}>
+                                <label className="form-label">Last Name</label>
+                                <input type="text" className="form-input" required
+                                    value={newOpData.lastName} onChange={e => setNewOpData({...newOpData, lastName: e.target.value})} />
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Phone Number</label>
+                            <input type="tel" className="form-input" required
+                                value={newOpData.phone} onChange={e => setNewOpData({...newOpData, phone: e.target.value})} />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Email</label>
+                            <input type="email" className="form-input" required
+                                value={newOpData.email} onChange={e => setNewOpData({...newOpData, email: e.target.value})} />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Password</label>
+                            <input type="text" className="form-input" required minLength={6}
+                                value={newOpData.password} onChange={e => setNewOpData({...newOpData, password: e.target.value})} />
+                        </div>
+                        <div className="flex justify-end gap-4 mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                            <button type="button" className="btn btn-secondary" onClick={() => setShowAddOpModal(false)}>Cancel</button>
+                            <button type="submit" className="btn btn-primary" disabled={isAddingOp}>
+                                {isAddingOp ? 'Adding...' : 'Add Operator'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        )}
+  
+        {/* Payroll Modal */}
+        {showPayrollModal && (
+            <div className="modal-overlay">
+                <div className="modal-content glass-card" style={{ maxWidth: '600px' }}>
+                    <button className="modal-close" onClick={() => setShowPayrollModal(false)}>X</button>
+                    <h3 className="mb-4">Run Payroll Summary</h3>
+                    
+                    {payrollSummary.length === 0 ? (
+                        <p>No verified batches ready for payroll.</p>
+                    ) : (
+                        <div className="flex flex-col gap-2">
+                            {payrollSummary.map(op => (
+                                <div key={op.operatorId} className="flex justify-between items-center" style={{ padding: '0.5rem 1rem', border: '1px solid var(--glass-border)', borderRadius: '0.5rem', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                                    <div>
+                                        <div style={{ fontWeight: 600 }}>Operator: {formatOperatorName(op.operatorId)}</div>
+                                        <div style={{fontSize:'0.875rem', color: 'var(--text-secondary)'}}>{op.batchIds.length} batches to process</div>
+                                    </div>
+                                    <div style={{ fontWeight: 600, fontSize: '1.2rem', color: 'var(--status-paid)' }}>${op.total.toFixed(2)}</div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+  
+                    <div className="flex justify-end gap-4 mt-6 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                        <button className="btn btn-secondary" onClick={() => setShowPayrollModal(false)}>Cancel</button>
+                        <button className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleRunPayroll} disabled={isProcessingPayroll || payrollSummary.length === 0}>
+                            {isProcessingPayroll ? 'Processing...' : 'Confirm & Run ACH Transfers'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+  
+        {/* 1099 Modal */}
+        {show1099Modal && (
+            <div className="modal-overlay">
+                <div className="modal-content glass-card" style={{ maxWidth: '600px', maxHeight: '80vh', overflowY: 'auto' }}>
+                    <button className="modal-close" onClick={() => setShow1099Modal(false)}>X</button>
+                    <h3 className="mb-4">Generate 1099s</h3>
+                    
+                    <form onSubmit={handleGenerate1099} className="flex gap-4 items-end mb-4">
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label">Tax Year</label>
+                            <input type="number" className="form-input" required value={year1099} onChange={e => setYear1099(e.target.value)} />
+                        </div>
+                        <button type="submit" className="btn btn-primary" disabled={isGenerating1099}>
+                            {isGenerating1099 ? 'Generating...' : 'Run Generation'}
+                        </button>
+                    </form>
+                    
+                    {taxResults && (
+                        <div className="mt-4">
+                            <h4 style={{marginBottom: '0.5rem'}}>Results for {year1099}</h4>
+                            <p style={{marginBottom: '1rem', fontSize: '0.875rem', color: 'var(--text-secondary)'}}>Found {taxResults.length} operators with $600+ YTD earnings.</p>
+                            
+                            <div className="flex flex-col gap-2">
+                                {taxResults.map(r => (
+                                    <div key={r.operatorId} className="glass-card" style={{ padding: '0.75rem', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                                        <div className="flex justify-between" style={{fontWeight: 600}}>
+                                            <span>{r.name}</span>
+                                            <span style={{color: 'var(--status-paid)'}}>${r.ytdTotal.toFixed(2)}</span>
+                                        </div>
+                                        <div style={{fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
+                                            {r.email} | SSN/EIN: {r.ssnOrEin}
+                                        </div>
+                                    </div>
+                                ))}
+                                {taxResults.length === 0 && <p>No operators met the $600 threshold.</p>}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
+  
+        {paystubPdfData && (
+            <div className="modal-overlay" onClick={() => setPaystubPdfData(null)}>
+                <div className="modal-content" onClick={e => e.stopPropagation()} style={{ width: '90%', maxWidth: '800px', height: '85vh', display: 'flex', flexDirection: 'column' }}>
+                    <div className="flex justify-between items-center mb-4">
+                        <h3>Paystub Preview</h3>
+                        <div className="flex gap-4">
+                            <a href={paystubPdfData.url} download={paystubPdfData.filename} className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)', textDecoration: 'none', display: 'flex', alignItems: 'center'}}>Download PDF</a>
+                            <button className="btn btn-secondary" onClick={() => setPaystubPdfData(null)}>Close</button>
+                        </div>
+                    </div>
+                    <iframe src={paystubPdfData.url} style={{ width: '100%', flex: 1, border: 'none', borderRadius: '8px', backgroundColor: '#fff' }} title="Paystub Preview"></iframe>
+                </div>
+            </div>
+        )}
+      </div>
     </div>
   );
 }

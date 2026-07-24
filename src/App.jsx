@@ -12,9 +12,8 @@ import AdminDashboard from './pages/AdminDashboard';
 import OperatorManagement from './pages/OperatorManagement';
 import Onboarding from './pages/Onboarding';
 
-// Protected Route Wrapper
 const ProtectedRoute = ({ children, requiredRole }) => {
-  const { currentUser, userData, loading } = useAuth();
+  const { currentUser, userClaims, userData, loading } = useAuth();
 
   if (loading) return <div className="container mt-8"><div className="spinner"></div></div>;
 
@@ -22,9 +21,13 @@ const ProtectedRoute = ({ children, requiredRole }) => {
     return <Navigate to="/login" />;
   }
 
-  if (requiredRole && userData?.role !== requiredRole) {
+  // Check claims or fallback to firestore role
+  const hasRole = (userClaims && userClaims[requiredRole]) || (userData && userData.role === requiredRole);
+  
+  if (requiredRole && !hasRole) {
     // Redirect based on actual role if they try to access the wrong portal
-    return <Navigate to={userData?.role === 'admin' ? '/admin' : '/operator'} />;
+    const actualRole = (userClaims && userClaims.admin) ? 'admin' : (userData?.role === 'admin' ? 'admin' : 'operator');
+    return <Navigate to={actualRole === 'admin' ? '/admin' : '/operator'} />;
   }
 
   return children;

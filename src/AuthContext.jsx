@@ -12,6 +12,7 @@ export function useAuth() {
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [userData, setUserData] = useState(null);
+  const [userClaims, setUserClaims] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -19,6 +20,13 @@ export function AuthProvider({ children }) {
       setCurrentUser(user);
       
       if (user) {
+        try {
+          const idTokenResult = await user.getIdTokenResult();
+          setUserClaims(idTokenResult.claims);
+        } catch (error) {
+          console.error("Error fetching custom claims:", error);
+        }
+
         // Fetch custom user data from Firestore (role, ratePerBoot, etc.)
         try {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -33,6 +41,7 @@ export function AuthProvider({ children }) {
         }
       } else {
         setUserData(null);
+        setUserClaims(null);
       }
       
       setLoading(false);
@@ -44,6 +53,7 @@ export function AuthProvider({ children }) {
   const value = {
     currentUser,
     userData,
+    userClaims,
     loading
   };
 

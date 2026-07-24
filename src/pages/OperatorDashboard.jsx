@@ -5,6 +5,7 @@ import { db, auth } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { MessageSquare } from 'lucide-react';
+import { SkeletonLoader } from '../components/SkeletonLoader';
 
 export default function OperatorDashboard() {
   const { userData } = useAuth();
@@ -72,14 +73,18 @@ export default function OperatorDashboard() {
 
       <h3>Recent Batches</h3>
       {loading ? (
-        <div className="mt-4"><div className="spinner"></div></div>
+        <div className="flex flex-col gap-2 mt-4">
+           <SkeletonLoader type="card" />
+           <SkeletonLoader type="card" />
+           <SkeletonLoader type="card" />
+        </div>
       ) : (
         <div className="flex flex-col gap-2 mt-4">
           {batches.length === 0 ? <p>No batches found.</p> : null}
           {batches.map(batch => (
             <div key={batch.id} className="glass-card flex justify-between items-center">
               <div>
-                <div style={{ fontWeight: 500 }}>{batch.date ? new Date(batch.date.toDate()).toLocaleDateString() : 'N/A'}</div>
+                <div style={{ fontWeight: 500 }}>{batch.date ? new Date(batch.date.seconds ? batch.date.seconds * 1000 : batch.date).toLocaleDateString() : 'N/A'}</div>
                 <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
                   {batch.expectedItemCount} boots
                 </div>

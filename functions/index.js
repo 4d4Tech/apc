@@ -86,6 +86,8 @@ exports.addOperator = onCall(async (request) => {
             ratePerBoot: 10
         });
 
+        await getAuth().setCustomUserClaims(userRecord.uid, { operator: true });
+
         return { success: true, uid: userRecord.uid };
     } catch (error) {
         console.error("Error creating operator:", error);
@@ -135,6 +137,15 @@ exports.runPayroll = onCall(async (request) => {
 
         if (operatorData.stripeAccountId && finalAmount > 0) {
             console.log(`Simulated transfer to ${operatorData.stripeAccountId} for $${finalAmount}`);
+            /* 
+            // Real implementation would look like this:
+            const transfer = await stripe.transfers.create({
+                amount: Math.round(finalAmount * 100),
+                currency: "usd",
+                destination: operatorData.stripeAccountId,
+                metadata: { batchId: batchId }
+            });
+            */
         }
 
         await batchRef.update({
@@ -153,8 +164,17 @@ exports.runPayroll = onCall(async (request) => {
 exports.stripeWebhook = onRequest(async (req, res) => {
     const event = req.body;
     try {
-        if (event.type === 'payout.paid') {
+        if (event.type === 'payout.paid' || event.type === 'transfer.paid') {
             console.log("Payout paid:", event);
+            // Assuming we pass batchId in transfer metadata
+            const batchId = event.data.object.metadata?.batchId;
+            if (batchId) {
+                await getFirestore().collection('batches').doc(batchId).update({
+                    status: 'paid',
+                    paidAt: new Date()
+                });
+                console.log(`Updated batch ${batchId} to paid status.`);
+            }
         }
         res.status(200).send('Webhook received');
     } catch (err) {

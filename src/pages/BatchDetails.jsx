@@ -5,6 +5,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, auth, storage } from '../firebase';
 import { useAuth } from '../AuthContext';
 import { CheckCircle2, ChevronLeft } from 'lucide-react';
+import { SkeletonLoader } from '../components/SkeletonLoader';
 
 export default function BatchDetails() {
   const { batchId } = useParams();
@@ -133,7 +134,13 @@ export default function BatchDetails() {
     }
   };
 
-  if (loading) return <div className="container mt-8"><div className="spinner"></div></div>;
+  if (loading) return (
+    <div className="container mt-8">
+      <SkeletonLoader type="block" />
+      <div className="mt-4"><SkeletonLoader type="card" /></div>
+      <div className="mt-4"><SkeletonLoader type="card" /></div>
+    </div>
+  );
   if (!batch) return <div className="container mt-8">Batch not found.</div>;
 
   const isMatched = transactions.length === batch.expectedItemCount;
