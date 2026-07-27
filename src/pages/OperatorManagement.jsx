@@ -22,6 +22,18 @@ export default function OperatorManagement() {
 
   const navigate = useNavigate();
 
+  const getNetPay = (batch) => {
+      let base = Number(batch.calculatedPay || 0);
+      if (batch.adjustments && Array.isArray(batch.adjustments)) {
+          batch.adjustments.forEach(adj => {
+              if (adj.type === 'deduction') base -= Number(adj.amount);
+              if (adj.type === 'reimbursement') base += Number(adj.amount);
+              if (adj.type === 'bonus') base += Number(adj.amount);
+          });
+      }
+      return base;
+  };
+
   const fetchOperators = async () => {
     setLoading(true);
     try {
@@ -70,9 +82,11 @@ export default function OperatorManagement() {
           const filteredBatches = batches
               .filter(b => ['paid', 'processing', 'archived'].includes(b.status))
               .sort((a, b) => {
-                  const dateA = a.date?.seconds || 0;
-                  const dateB = b.date?.seconds || 0;
-                  return dateB - dateA;
+                  const getSortTime = (batch) => {
+                      if (batch.date) return batch.date.seconds ? batch.date.seconds * 1000 : new Date(batch.date).getTime();
+                      return 0;
+                  };
+                  return getSortTime(b) - getSortTime(a);
               });
 
           setOperatorBatches(filteredBatches);
@@ -266,9 +280,7 @@ export default function OperatorManagement() {
                           <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Lifetime Earnings</div>
                           <div style={{ fontWeight: 600, fontSize: '1.5rem', color: 'var(--status-paid)' }}>
                               ${(
-                                  historyOperator.ytdEarnings 
-                                      ? Object.values(historyOperator.ytdEarnings).reduce((sum, val) => sum + val, 0) 
-                                      : operatorBatches.reduce((acc, b) => acc + Number(b.finalPayoutAmount || b.calculatedPay || 0), 0)
+                                  operatorBatches.reduce((acc, b) => acc + getNetPay(b), 0)
                               ).toFixed(2)}
                           </div>
                       </div>
@@ -306,7 +318,14 @@ export default function OperatorManagement() {
                                       {operatorBatches.map(batch => (
                                           <tr key={batch.id} className="table-row-hover">
                                               <td>
-                                                  {batch.date ? new Date(batch.date.seconds ? batch.date.seconds * 1000 : batch.date).toLocaleDateString() : 'N/A'}
+                                                  {batch.paidAt ? (
+                                                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                          <span>{new Date(batch.paidAt.seconds ? batch.paidAt.seconds * 1000 : batch.paidAt).toLocaleDateString()}</span>
+                                                          <span style={{ fontSize: '0.75rem', color: 'var(--status-paid)' }}>Paid</span>
+                                                      </div>
+                                                  ) : (
+                                                      batch.date ? new Date(batch.date.seconds ? batch.date.seconds * 1000 : batch.date).toLocaleDateString() : 'N/A'
+                                                  )}
                                               </td>
                                               <td>{batch.expectedItemCount || 0}</td>
                                               <td>

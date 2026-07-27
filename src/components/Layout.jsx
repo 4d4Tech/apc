@@ -163,9 +163,9 @@ export default function Layout({ children }) {
                 {location.pathname.includes('/operator/batch/') && 'Batch Details'}
             </h2>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-secondary)' }}>Acme Corp</span>
-                <div style={{ width: '32px', height: '32px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', color: 'var(--text-primary)', fontSize: '0.875rem' }}>
-                    AC
+                <span style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-secondary)' }}>Austin Parking Company</span>
+                <div style={{ width: '32px', height: '32px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', color: 'var(--text-primary)', fontSize: '0.875rem', textTransform: 'uppercase' }}>
+                    {isAdmin ? 'APC' : `${userData?.firstName?.[0] || ''}${userData?.lastName?.[0] || ''}`}
                 </div>
             </div>
         </header>

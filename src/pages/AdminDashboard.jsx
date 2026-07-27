@@ -321,8 +321,9 @@ export default function AdminDashboard() {
   
       if (historyDateFilter !== 'all') {
           filtered = filtered.filter(b => {
-              if (!b.date) return false;
-              const batchDate = getSafeDate(b.date);
+              const sortDateStr = b.paidAt || b.date;
+              if (!sortDateStr) return false;
+              const batchDate = getSafeDate(sortDateStr);
               if (!batchDate) return false;
               const now = new Date();
               
@@ -345,6 +346,12 @@ export default function AdminDashboard() {
           });
       }
       
+      filtered.sort((a, b) => {
+          const dateA = a.date ? getSafeDate(a.date).getTime() : 0;
+          const dateB = b.date ? getSafeDate(b.date).getTime() : 0;
+          return dateB - dateA;
+      });
+
       return filtered;
   };
 
@@ -570,7 +577,16 @@ export default function AdminDashboard() {
                           {getFilteredHistory().map(batch => (
                               <tr key={batch.id} className="table-row-hover">
                                   <td>{formatOperatorName(batch.operatorId)}</td>
-                                  <td>{batch.date ? getSafeDate(batch.date).toLocaleDateString() : 'N/A'}</td>
+                                  <td>
+                                      {batch.paidAt ? (
+                                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                              <span>{getSafeDate(batch.paidAt).toLocaleDateString()}</span>
+                                              <span style={{ fontSize: '0.75rem', color: 'var(--status-paid)' }}>Paid</span>
+                                          </div>
+                                      ) : (
+                                          batch.date ? getSafeDate(batch.date).toLocaleDateString() : 'N/A'
+                                      )}
+                                  </td>
                                   <td>
                                       <div className="flex items-center gap-2">
                                           <span className={`badge badge-${batch.status}`}>
