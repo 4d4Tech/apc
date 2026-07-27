@@ -5,13 +5,26 @@ import { db, auth, functions } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { generatePaystubPDF } from '../utils/pdfGenerator';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, Archive, FileText, Eye } from 'lucide-react';
 
 const getSafeDate = (d) => {
     if (!d) return null;
     if (typeof d.toDate === 'function') return d.toDate();
     if (d.seconds) return new Date(d.seconds * 1000);
     return new Date(d);
+};
+
+const getNetPay = (batch) => {
+    const gross = batch.calculatedPay || 0;
+    let net = gross;
+    if (batch.adjustments) {
+        batch.adjustments.forEach(adj => {
+            if (adj.type === 'deduction') net -= Number(adj.amount);
+            if (adj.type === 'reimbursement') net += Number(adj.amount);
+            if (adj.type === 'bonus') net += Number(adj.amount);
+        });
+    }
+    return net;
 };
 
 export default function AdminDashboard() {
@@ -191,7 +204,7 @@ export default function AdminDashboard() {
               grouped[b.operatorId] = { operatorId: b.operatorId, batchIds: [], total: 0 };
           }
           grouped[b.operatorId].batchIds.push(b.id);
-          grouped[b.operatorId].total += (b.calculatedPay || 0);
+          grouped[b.operatorId].total += getNetPay(b);
       });
       setPayrollSummary(Object.values(grouped));
       setShowPayrollModal(true);
@@ -206,7 +219,7 @@ export default function AdminDashboard() {
               grouped[b.operatorId] = { operatorId: b.operatorId, batchIds: [], total: 0 };
           }
           grouped[b.operatorId].batchIds.push(b.id);
-          grouped[b.operatorId].total += (b.calculatedPay || 0);
+          grouped[b.operatorId].total += getNetPay(b);
       });
       setPayrollSummary(Object.values(grouped));
       setShowPayrollModal(true);
@@ -225,11 +238,22 @@ export default function AdminDashboard() {
           setSelectedVerifiedBatches([]);
           fetchBatches();
           alert("Payroll processing initiated!");
-      } catch (err) {
-          console.error(err);
-          alert("Error running payroll: " + err.message);
+      } catch (error) {
+          console.error("Error processing payroll:", error);
+          alert(error.message || "Failed to process payroll.");
       } finally {
           setIsProcessingPayroll(false);
+      }
+  };
+
+  const handleArchiveBatch = async (batchId) => {
+      if (!window.confirm("Are you sure you want to archive this batch? It will be hidden from the history view.")) return;
+      try {
+          await updateDoc(doc(db, 'batches', batchId), { status: 'archived' });
+          setBatches(prev => prev.map(b => b.id === batchId ? { ...b, status: 'archived' } : b));
+      } catch (err) {
+          console.error("Error archiving batch:", err);
+          alert("Failed to archive batch.");
       }
   };
 
@@ -324,7 +348,7 @@ export default function AdminDashboard() {
       return filtered;
   };
 
-  const pendingPayoutTotal = batches.filter(b => b.status === 'verified').reduce((sum, b) => sum + (b.calculatedPay || 0), 0);
+  const pendingPayoutTotal = batches.filter(b => b.status === 'verified').reduce((sum, b) => sum + getNetPay(b), 0);
   const activeOpsCount = Object.keys(operators).length;
   const pendingCount = batches.filter(b => b.status === 'pending').length;
 
@@ -341,7 +365,7 @@ export default function AdminDashboard() {
       <div className="container">
         {/* Top Banner metrics */}
         <div className="glass-card mb-6 flex justify-between items-center" style={{ padding: '1rem 1.5rem', backgroundColor: 'rgba(30, 41, 59, 0.8)' }}>
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-6 flex-responsive">
                <div>
                   <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Total Pending Payout</div>
                   <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--status-paid)' }}>${pendingPayoutTotal.toFixed(2)} Ready</div>
@@ -393,7 +417,7 @@ export default function AdminDashboard() {
                                   <td>{formatOperatorName(batch.operatorId)}</td>
                                   <td>{batch.date ? getSafeDate(batch.date).toLocaleDateString() : 'N/A'}</td>
                                   <td><span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>{batch.expectedItemCount} boots</span></td>
-                                  <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
+                                  <td style={{ fontWeight: 600 }}>${getNetPay(batch).toFixed(2)}</td>
                                   <td><span className="badge badge-pending">Pending</span></td>
                                   <td>
                                       <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)}>Review</button>
@@ -410,7 +434,7 @@ export default function AdminDashboard() {
         </div>
   
         <div className="glass-card mt-8">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-4 flex-responsive">
               <h3>Verified Batches (Ready for Payroll)</h3>
               <div className="flex gap-4 items-center">
                   <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
@@ -459,7 +483,7 @@ export default function AdminDashboard() {
                                   <td>{formatOperatorName(batch.operatorId)}</td>
                                   <td>{batch.date ? getSafeDate(batch.date).toLocaleDateString() : 'N/A'}</td>
                                   <td><span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>{batch.expectedItemCount} boots</span></td>
-                                  <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
+                                  <td style={{ fontWeight: 600 }}>${getNetPay(batch).toFixed(2)}</td>
                                   <td>
                                       <div className="flex items-center gap-2">
                                           <span className="badge badge-verified">Verified</span>
@@ -488,7 +512,7 @@ export default function AdminDashboard() {
         </div>
   
         <div className="glass-card mt-8">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-4 flex-responsive">
               <h3>Batch History (Paid / Processing / Rejected)</h3>
               <div className="flex gap-4">
                   <select 
@@ -522,7 +546,7 @@ export default function AdminDashboard() {
                               <th>Date</th>
                               <th>Status</th>
                               <th>Payout</th>
-                              <th>Documents</th>
+                              <th style={{ textAlign: 'center' }}>Documents</th>
                           </tr>
                       </thead>
                       <tbody>
@@ -545,15 +569,22 @@ export default function AdminDashboard() {
                                           )}
                                       </div>
                                   </td>
-                                  <td style={{ fontWeight: 600 }}>${batch.calculatedPay?.toFixed(2) || '0.00'}</td>
-                                  <td>
-                                      <div className="flex gap-2">
+                                  <td style={{ fontWeight: 600 }}>${getNetPay(batch).toFixed(2)}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                      <div className="flex gap-2" style={{ justifyContent: 'center' }}>
                                           {(batch.status === 'paid' || batch.status === 'processing') && (
-                                              <button className="btn btn-secondary" style={{ padding: '0.5rem', fontSize: '0.875rem' }} disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)}>
-                                                  {isDownloadingPaystub ? '...' : 'PDF Stub'}
+                                              <button className="btn btn-secondary icon-btn-mobile" style={{ padding: '0.5rem', fontSize: '0.875rem' }} disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)} title="PDF Stub">
+                                                  <FileText size={16} />
+                                                  <span className="hide-on-mobile">{isDownloadingPaystub ? '...' : 'PDF Stub'}</span>
                                               </button>
                                           )}
-                                          <button className="btn btn-secondary" style={{ padding: '0.5rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)}>View Docs</button>
+                                          <button className="btn btn-secondary icon-btn-mobile" style={{ padding: '0.5rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)} title="View Docs">
+                                              <Eye size={16} />
+                                              <span className="hide-on-mobile">View Docs</span>
+                                          </button>
+                                          <button className="btn btn-secondary icon-btn-mobile" style={{ padding: '0.5rem', fontSize: '0.875rem', color: 'var(--status-error)' }} title="Archive Batch" onClick={() => handleArchiveBatch(batch.id)}>
+                                              <Archive size={16} />
+                                          </button>
                                       </div>
                                   </td>
                               </tr>
@@ -574,7 +605,7 @@ export default function AdminDashboard() {
                     <button className="modal-close" onClick={handleCloseModal}>X</button>
                     <h3 className="mb-4">Review Batch</h3>
                     
-                    <div className="flex gap-4">
+                    <div className="flex gap-4 flex-responsive">
                         <div style={{ flex: 1 }}>
                             <h4 className="mb-2">Daily Summary Ticket</h4>
                             <img src={selectedBatch.batchTicketUrl} alt="Batch Ticket" style={{ width: '100%', borderRadius: '0.5rem' }}/>
@@ -588,10 +619,19 @@ export default function AdminDashboard() {
                                         <div>${tx.amountPaid} (*{tx.cardLast4})</div>
                                     </div>
                                     <div className="flex gap-2">
-                                        <a href={tx.photos.vehicle} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Vehicle</a>
-                                        <a href={tx.photos.receipt} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Receipt</a>
-                                        <a href={tx.photos.release} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Release</a>
-                                    </div>
+                                      {Array.isArray(tx.photos) ? tx.photos.map((url, pIdx) => (
+                                          <a key={pIdx} href={url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Photo {pIdx + 1}</a>
+                                      )) : tx.photos && (
+                                          <>
+                                              {tx.photos.vehicle && (Array.isArray(tx.photos.vehicle) 
+                                                  ? tx.photos.vehicle.map((vUrl, vIdx) => <a key={`v${vIdx}`} href={vUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Vehicle {vIdx + 1}</a>) 
+                                                  : <a href={tx.photos.vehicle} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Vehicle</a>
+                                              )}
+                                              {tx.photos.receipt && <a href={tx.photos.receipt} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Receipt</a>}
+                                              {tx.photos.release && <a href={tx.photos.release} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Release</a>}
+                                          </>
+                                      )}
+                                  </div>
                                 </div>
                             ))}
                             
@@ -617,6 +657,7 @@ export default function AdminDashboard() {
                                         <select className="form-input" style={{width: 'auto', padding: '0.5rem'}} value={adjType} onChange={e => setAdjType(e.target.value)}>
                                             <option value="deduction">Deduct</option>
                                             <option value="reimbursement">Reimburse</option>
+                                            <option value="bonus">Bonus</option>
                                         </select>
                                         <input type="text" className="form-input" placeholder="Desc" required value={adjDesc} onChange={e => setAdjDesc(e.target.value)} />
                                         <input type="number" step="0.01" className="form-input" placeholder="$0.00" style={{width: '80px'}} required value={adjAmount} onChange={e => setAdjAmount(e.target.value)} />
@@ -661,7 +702,7 @@ export default function AdminDashboard() {
                     <h3 className="mb-4">Add Boot Operator</h3>
                     {addOpError && <div style={{ color: 'var(--status-error)', marginBottom: '1rem' }}>{addOpError}</div>}
                     <form onSubmit={handleAddOperator}>
-                        <div className="flex gap-4">
+                        <div className="flex gap-4 flex-responsive">
                             <div className="form-group" style={{ flex: 1 }}>
                                 <label className="form-label">First Name</label>
                                 <input type="text" className="form-input" required
@@ -711,7 +752,7 @@ export default function AdminDashboard() {
                     ) : (
                         <div className="flex flex-col gap-2">
                             {payrollSummary.map(op => (
-                                <div key={op.operatorId} className="flex justify-between items-center" style={{ padding: '0.5rem 1rem', border: '1px solid var(--glass-border)', borderRadius: '0.5rem', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                                <div key={op.operatorId} className="flex justify-between items-center flex-stack-mobile" style={{ padding: '0.5rem 1rem', border: '1px solid var(--glass-border)', borderRadius: '0.5rem', backgroundColor: 'rgba(255,255,255,0.02)' }}>
                                     <div>
                                         <div style={{ fontWeight: 600 }}>Operator: {formatOperatorName(op.operatorId)}</div>
                                         <div style={{fontSize:'0.875rem', color: 'var(--text-secondary)'}}>{op.batchIds.length} batches to process</div>
@@ -739,7 +780,7 @@ export default function AdminDashboard() {
                     <button className="modal-close" onClick={() => setShow1099Modal(false)}>X</button>
                     <h3 className="mb-4">Generate 1099s</h3>
                     
-                    <form onSubmit={handleGenerate1099} className="flex gap-4 items-end mb-4">
+                    <form onSubmit={handleGenerate1099} className="flex gap-4 items-end mb-4 flex-responsive">
                         <div className="form-group" style={{ marginBottom: 0 }}>
                             <label className="form-label">Tax Year</label>
                             <input type="number" className="form-input" required value={year1099} onChange={e => setYear1099(e.target.value)} />

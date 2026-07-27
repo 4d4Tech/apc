@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Edit2 } from 'lucide-react';
+import { ChevronLeft, Edit2, History } from 'lucide-react';
 
 export default function OperatorManagement() {
   const [operators, setOperators] = useState([]);
@@ -15,6 +15,10 @@ export default function OperatorManagement() {
       phone: '',
       ratePerBoot: 0
   });
+
+  const [historyOperator, setHistoryOperator] = useState(null);
+  const [operatorBatches, setOperatorBatches] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const navigate = useNavigate();
 
@@ -49,6 +53,40 @@ export default function OperatorManagement() {
 
   const handleCloseEdit = () => {
       setEditingOperator(null);
+  };
+
+  const handleOpenHistory = async (op) => {
+      setHistoryOperator(op);
+      setHistoryLoading(true);
+      try {
+          const q = query(
+              collection(db, 'batches'),
+              where('operatorId', '==', op.id)
+          );
+          const snap = await getDocs(q);
+          const batches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          
+          // Filter and sort in memory to avoid needing a Firestore composite index
+          const filteredBatches = batches
+              .filter(b => ['paid', 'processing', 'archived'].includes(b.status))
+              .sort((a, b) => {
+                  const dateA = a.date?.seconds || 0;
+                  const dateB = b.date?.seconds || 0;
+                  return dateB - dateA;
+              });
+
+          setOperatorBatches(filteredBatches);
+      } catch (err) {
+          console.error("Error fetching operator history:", err);
+          alert("Failed to fetch history.");
+      } finally {
+          setHistoryLoading(false);
+      }
+  };
+
+  const handleCloseHistory = () => {
+      setHistoryOperator(null);
+      setOperatorBatches([]);
   };
 
   const handleSaveEdit = async (e) => {
@@ -104,13 +142,24 @@ export default function OperatorManagement() {
                     <td>{op.phone || 'N/A'}</td>
                     <td style={{ fontWeight: 600 }}>${Number(op.ratePerBoot || 0).toFixed(2)}/boot</td>
                     <td>
-                        <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '0.5rem' }} 
-                            onClick={() => handleOpenEdit(op)}
-                        >
-                            <Edit2 size={16} />
-                        </button>
+                        <div className="flex gap-2">
+                            <button 
+                                className="btn btn-secondary" 
+                                style={{ padding: '0.5rem' }} 
+                                onClick={() => handleOpenEdit(op)}
+                                title="Edit Operator"
+                            >
+                                <Edit2 size={16} />
+                            </button>
+                            <button 
+                                className="btn btn-secondary" 
+                                style={{ padding: '0.5rem' }} 
+                                onClick={() => handleOpenHistory(op)}
+                                title="View History"
+                            >
+                                <History size={16} />
+                            </button>
+                        </div>
                     </td>
                   </tr>
                 ))}
@@ -188,6 +237,91 @@ export default function OperatorManagement() {
                           <button type="submit" className="btn btn-primary">Save Changes</button>
                       </div>
                   </form>
+              </div>
+          </div>
+      )}
+
+      {/* History Modal */}
+      {historyOperator && (
+          <div className="modal-overlay">
+              <div className="modal-content glass-card" style={{ maxWidth: '800px', width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
+                  <button className="modal-close" onClick={handleCloseHistory}>X</button>
+                  <h3 className="mb-4">Financial History</h3>
+                  
+                  <div className="flex justify-between items-center mb-6 pb-4">
+                      <div>
+                          <div style={{ fontWeight: 600, fontSize: '1.125rem' }}>
+                              {`${historyOperator.firstName || ''} ${historyOperator.lastName || ''}`.trim() || historyOperator.name || 'Unknown Operator'}
+                          </div>
+                          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                              UID: {historyOperator.id}
+                          </div>
+                      </div>
+                  </div>
+
+                  <div className="flex gap-4 mb-6 flex-stack-mobile">
+                      <div className="glass-card flex-1 text-center" style={{ padding: '1rem' }}>
+                          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Lifetime Earnings</div>
+                          <div style={{ fontWeight: 600, fontSize: '1.5rem', color: 'var(--status-paid)' }}>
+                              ${(
+                                  historyOperator.ytdEarnings 
+                                      ? Object.values(historyOperator.ytdEarnings).reduce((sum, val) => sum + val, 0) 
+                                      : operatorBatches.reduce((acc, b) => acc + Number(b.finalPayoutAmount || b.calculatedPay || 0), 0)
+                              ).toFixed(2)}
+                          </div>
+                      </div>
+                      <div className="glass-card flex-1 text-center" style={{ padding: '1rem' }}>
+                          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Total Bonuses</div>
+                          <div style={{ fontWeight: 600, fontSize: '1.5rem', color: 'var(--accent-primary)' }}>
+                              ${operatorBatches.reduce((acc, b) => acc + (b.adjustments ? b.adjustments.filter(a => a.type === 'bonus').reduce((sum, a) => sum + Number(a.amount), 0) : 0), 0).toFixed(2)}
+                          </div>
+                      </div>
+                      <div className="glass-card flex-1 text-center" style={{ padding: '1rem' }}>
+                          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Total Boots</div>
+                          <div style={{ fontWeight: 600, fontSize: '1.5rem' }}>
+                              {operatorBatches.reduce((acc, b) => acc + (b.expectedItemCount || 0), 0)}
+                          </div>
+                      </div>
+                  </div>
+
+                  {historyLoading ? (
+                      <div className="spinner my-8 mx-auto"></div>
+                  ) : (
+                      <div className="table-container">
+                          {operatorBatches.length === 0 ? (
+                              <p className="text-center" style={{ color: 'var(--text-secondary)' }}>No financial history found.</p>
+                          ) : (
+                              <table>
+                                  <thead>
+                                      <tr>
+                                          <th>Date</th>
+                                          <th>Boots</th>
+                                          <th>Status</th>
+                                          <th>Payout</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody>
+                                      {operatorBatches.map(batch => (
+                                          <tr key={batch.id} className="table-row-hover">
+                                              <td>
+                                                  {batch.date ? new Date(batch.date.seconds ? batch.date.seconds * 1000 : batch.date).toLocaleDateString() : 'N/A'}
+                                              </td>
+                                              <td>{batch.expectedItemCount || 0}</td>
+                                              <td>
+                                                  <span className={`badge badge-${batch.status}`}>
+                                                      {batch.status}
+                                                  </span>
+                                              </td>
+                                              <td style={{ fontWeight: 600, color: 'var(--status-paid)' }}>
+                                                  ${(batch.finalPayoutAmount || 0).toFixed(2)}
+                                              </td>
+                                          </tr>
+                                      ))}
+                                  </tbody>
+                              </table>
+                          )}
+                      </div>
+                  )}
               </div>
           </div>
       )}

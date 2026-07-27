@@ -179,6 +179,12 @@ a:hover {
   border: 1px solid #581c87;
 }
 
+.badge-draft {
+  background-color: #334155;
+  color: #cbd5e1;
+  border: 1px solid #64748b;
+}
+
 .badge-verified {
   background-color: #0c4a6e;
   color: #7dd3fc;
@@ -291,4 +297,78 @@ tr:last-child td {
 
 .table-row-hover:hover {
   background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  html, body {
+    font-size: 14px;
+  }
+  
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.25rem; }
+  h3 { font-size: 1.125rem; }
+  h4 { font-size: 1rem; }
+
+  .btn {
+    padding: 0.5rem 1rem !important;
+    font-size: 0.875rem !important;
+  }
+  
+  th, td {
+    padding: 0.5rem !important;
+    font-size: 0.875rem;
+  }
+
+  .flex {
+    flex-wrap: wrap;
+  }
+
+  .hide-on-mobile {
+    display: none !important;
+  }
+  
+  .icon-btn-mobile {
+    padding: 0.5rem !important;
+    min-width: unset !important;
+  }
+
+  .container {
+    padding: 0 1rem;
+  }
+  
+  .flex-responsive {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 1rem !important;
+  }
+  
+  .flex-responsive > .btn,
+  .flex-responsive > .form-input,
+  .flex-responsive > .form-group {
+    width: 100% !important;
+  }
+
+  /* Make sure modal is scrollable and fits */
+  .modal-content {
+    width: 95% !important;
+    padding: 1rem !important;
+    margin: 1rem !important;
+  }
+  
+  .glass-card {
+    padding: 1rem;
+  }
+
+  .table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+  
+  /* Stack certain internal flex rows on mobile */
+  .flex-stack-mobile {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
 }

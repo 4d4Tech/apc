@@ -130,10 +130,22 @@ exports.runPayroll = onCall(async (request) => {
         let finalAmount = totalAmount;
         if (batchData.adjustments && Array.isArray(batchData.adjustments)) {
             batchData.adjustments.forEach(adj => {
-                if (adj.type === 'deduction') finalAmount -= adj.amount;
-                if (adj.type === 'reimbursement') finalAmount += adj.amount;
+                const amt = Number(adj.amount) || 0;
+                if (adj.type === 'deduction') finalAmount -= amt;
+                if (adj.type === 'reimbursement') finalAmount += amt;
+                if (adj.type === 'bonus') finalAmount += amt;
             });
         }
+
+        // Calculate and update YTD
+        const batchDate = batchData.date ? batchData.date.toDate() : new Date();
+        const year = batchDate.getFullYear().toString();
+        const currentYTD = (operatorData.ytdEarnings && operatorData.ytdEarnings[year]) ? operatorData.ytdEarnings[year] : 0;
+        const newYTD = currentYTD + finalAmount;
+
+        await getFirestore().collection('users').doc(batchData.operatorId).update({
+            [`ytdEarnings.${year}`]: newYTD
+        });
 
         if (operatorData.stripeAccountId && finalAmount > 0) {
             console.log(`Simulated transfer to ${operatorData.stripeAccountId} for $${finalAmount}`);
@@ -149,9 +161,10 @@ exports.runPayroll = onCall(async (request) => {
         }
 
         await batchRef.update({
-            status: 'processing',
+            status: batchData.reviewNotes ? 'processing' : 'paid',
             finalPayoutAmount: finalAmount,
-            payrollRunAt: new Date()
+            payrollRunAt: new Date(),
+            ytdAtPayrollRun: newYTD
         });
 
         return { success: true, finalAmount };
@@ -215,21 +228,26 @@ exports.generatepaystub = onCall(async (request) => {
         const startOfYear = new Date(`${year}-01-01T00:00:00Z`);
         const endOfYear = new Date(`${year}-12-31T23:59:59Z`);
 
-        const batchesSnap = await getFirestore().collection('batches')
-            .where('operatorId', '==', operatorId)
-            .where('status', 'in', ['paid', 'processing'])
-            .get();
+        let ytdTotal = batchData.ytdAtPayrollRun || 0;
+        
+        if (!batchData.ytdAtPayrollRun) {
+            const batchesSnap = await getFirestore().collection('batches')
+                .where('operatorId', '==', operatorId)
+                .where('status', 'in', ['paid', 'processing'])
+                .get();
 
-        let ytdTotal = 0;
-        batchesSnap.docs.forEach(bDoc => {
-            const b = bDoc.data();
-            if (b.payrollRunAt) {
-                const runDate = b.payrollRunAt.toDate();
-                if (runDate >= startOfYear && runDate <= endOfYear && runDate <= batchDate) {
-                    ytdTotal += (b.finalPayoutAmount || 0);
+            batchesSnap.docs.forEach(bDoc => {
+                const b = bDoc.data();
+                // Determine the relevant date (either when payroll was run or the batch date)
+                const relevantTimestamp = b.payrollRunAt || b.date;
+                if (relevantTimestamp) {
+                    const runDate = relevantTimestamp.toDate ? relevantTimestamp.toDate() : new Date(relevantTimestamp);
+                    if (runDate >= startOfYear && runDate <= endOfYear && runDate <= batchDate) {
+                        ytdTotal += Number(b.finalPayoutAmount || b.calculatedPay || 0);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         // Get transactions for daily breakdown
         const txSnap = await getFirestore().collection(`batches/${batchId}/transactions`).get();
@@ -273,8 +291,10 @@ exports.generatepaystub = onCall(async (request) => {
         let bonus = 0;
         if (batchData.adjustments) {
             batchData.adjustments.forEach(adj => {
-                if (adj.type === 'reimbursement') bonus += adj.amount;
-                if (adj.type === 'deduction') basePay -= adj.amount;
+                const amount = Number(adj.amount) || 0;
+                if (adj.type === 'bonus') bonus += amount;
+                if (adj.type === 'reimbursement') basePay += amount;
+                if (adj.type === 'deduction') basePay -= amount;
             });
         }
 
@@ -298,7 +318,7 @@ exports.generatepaystub = onCall(async (request) => {
                     totalBooted: totalBooted,
                     totalAmount: basePay,
                     bonus: bonus,
-                    grossTotal: batchData.finalPayoutAmount || (basePay + bonus),
+                    grossTotal: (basePay + bonus),
                     ytd: ytdTotal || (basePay + bonus)
                 }
             }

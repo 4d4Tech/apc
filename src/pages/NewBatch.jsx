@@ -12,7 +12,6 @@ export default function NewBatch() {
   const [uploading, setUploading] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
   const [entryMode, setEntryMode] = useState('ai'); // 'ai' or 'manual'
-  const [manualTotalAmount, setManualTotalAmount] = useState('');
   const [manualItemCount, setManualItemCount] = useState('');
   const navigate = useNavigate();
   const { userData } = useAuth();
@@ -50,32 +49,51 @@ export default function NewBatch() {
 
   const handleCreateBatch = async () => {
     let finalData = null;
+    let finalTicketUrl = ticketUrl;
     
     if (entryMode === 'ai' && extractedData) {
         finalData = extractedData;
-    } else if (entryMode === 'manual' && manualTotalAmount && manualItemCount) {
+    } else if (entryMode === 'manual' && manualItemCount) {
         finalData = {
-            batchTotalAmount: parseFloat(manualTotalAmount),
+            batchTotalAmount: 0,
             expectedItemCount: parseInt(manualItemCount, 10)
         };
+
+        if (ticketImage && !ticketUrl) {
+            setUploading(true);
+            try {
+                const storageRef = ref(storage, `uploads/${auth.currentUser.uid}/tickets/${Date.now()}_${ticketImage.name}`);
+                await uploadBytes(storageRef, ticketImage);
+                finalTicketUrl = await getDownloadURL(storageRef);
+            } catch (err) {
+                console.error("Error uploading image manually", err);
+                alert("Failed to upload image.");
+                setUploading(false);
+                return;
+            }
+            setUploading(false);
+        }
     }
 
     if (!finalData) return;
 
+    setUploading(true);
     try {
       const batchRef = await addDoc(collection(db, 'batches'), {
         operatorId: auth.currentUser.uid,
         date: serverTimestamp(),
-        status: 'pending',
-        batchTicketUrl: ticketUrl || null, // Optional for manual
+        status: 'draft', // Optional for manual
+        batchTicketUrl: finalTicketUrl || null, // Optional for manual
         batchTotalAmount: finalData.batchTotalAmount,
         expectedItemCount: finalData.expectedItemCount,
         calculatedPay: finalData.expectedItemCount * (userData?.ratePerBoot || 0)
       });
+      setUploading(false);
       // Redirect to transaction form/details page for this batch (To be created)
       navigate(`/operator/batch/${batchRef.id}`);
     } catch (err) {
       console.error("Error creating batch:", err);
+      setUploading(false);
     }
   };
 
@@ -124,17 +142,13 @@ export default function NewBatch() {
               <h3>2. AI Extracted Data</h3>
               <div className="flex gap-4 mt-4">
                  <div>
-                   <div className="form-label">Total Amount</div>
-                   <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>${extractedData.batchTotalAmount.toFixed(2)}</div>
-                 </div>
-                 <div>
                    <div className="form-label">Expected Boots</div>
                    <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{extractedData.expectedItemCount}</div>
                  </div>
               </div>
               
-              <button className="btn btn-primary mt-4" onClick={handleCreateBatch} style={{ width: '100%' }}>
-                Confirm & Add Vehicles
+              <button className="btn btn-primary mt-4" onClick={handleCreateBatch} disabled={uploading} style={{ width: '100%' }}>
+                {uploading ? 'Creating...' : 'Confirm & Add Vehicles'}
               </button>
             </div>
           )}
@@ -147,17 +161,9 @@ export default function NewBatch() {
           <p className="form-label mb-4">Enter the totals from your terminal summary receipt.</p>
           
           <div className="form-group">
-            <label className="form-label">Total Amount Collected ($)</label>
-            <input 
-              type="number" 
-              step="0.01" 
-              className="form-input" 
-              value={manualTotalAmount}
-              onChange={(e) => setManualTotalAmount(e.target.value)}
-              placeholder="e.g. 150.00"
-            />
+            <label className="form-label">Batch Image (Optional)</label>
+            <input type="file" accept="image/*" onChange={handleFileChange} className="form-input" />
           </div>
-          
           <div className="form-group">
             <label className="form-label">Expected Boot Count</label>
             <input 
@@ -172,10 +178,10 @@ export default function NewBatch() {
           <button 
             className="btn btn-primary mt-4" 
             onClick={handleCreateBatch} 
-            disabled={!manualTotalAmount || !manualItemCount}
+            disabled={!manualItemCount || uploading}
             style={{ width: '100%' }}
           >
-            Confirm & Add Vehicles
+            {uploading ? 'Creating Batch...' : 'Confirm & Add Vehicles'}
           </button>
         </div>
       )}
