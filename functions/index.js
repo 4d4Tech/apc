@@ -161,8 +161,9 @@ exports.runPayroll = onCall(async (request) => {
         }
 
         await batchRef.update({
-            status: batchData.reviewNotes ? 'processing' : 'paid',
+            status: 'paid',
             finalPayoutAmount: finalAmount,
+            paidAt: new Date(),
             payrollRunAt: new Date(),
             ytdAtPayrollRun: newYTD
         });
