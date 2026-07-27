@@ -5,7 +5,7 @@ import { db, auth, functions } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { generatePaystubPDF } from '../utils/pdfGenerator';
-import { MessageSquare, Archive, FileText, Eye } from 'lucide-react';
+import { MessageSquare, Archive, FileText, Eye, Users } from 'lucide-react';
 
 const getSafeDate = (d) => {
     if (!d) return null;
@@ -353,48 +353,65 @@ export default function AdminDashboard() {
   const pendingCount = batches.filter(b => b.status === 'pending').length;
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      backgroundImage: 'url(/admin-bg.jpg)',
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      backgroundAttachment: 'fixed',
-      paddingTop: '2rem',
-      paddingBottom: '2rem'
-    }}>
-      <div className="container">
-        {/* Top Banner metrics */}
-        <div className="glass-card mb-6 flex justify-between items-center" style={{ padding: '1rem 1.5rem', backgroundColor: 'rgba(30, 41, 59, 0.8)' }}>
-            <div className="flex items-center gap-6 flex-responsive">
-               <div>
-                  <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Total Pending Payout</div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--status-paid)' }}>${pendingPayoutTotal.toFixed(2)} Ready</div>
-               </div>
-               <div style={{ borderLeft: '1px solid var(--glass-border)', height: '40px' }}></div>
-               <div 
-                  style={{ cursor: 'pointer', padding: '0.5rem', borderRadius: '0.5rem', transition: 'background-color 0.2s' }}
-                  onClick={() => navigate('/admin/operators')}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-               >
-                  <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Active Operators</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{activeOpsCount}</div>
-               </div>
-               <div style={{ borderLeft: '1px solid var(--glass-border)', height: '40px' }}></div>
-               <div>
-                  <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>Pending Verification</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--status-pending)' }}>{pendingCount}</div>
-               </div>
-            </div>
-            
-            <div className="flex gap-2">
-                <button className="btn btn-primary" style={{backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)'}} onClick={handleOpenPayroll}>Run All Payroll</button>
-                <button className="btn btn-secondary" onClick={() => setShow1099Modal(true)}>Year-End Tax (1099)</button>
-                <button className="btn btn-secondary" onClick={() => setShowAddOpModal(true)}>Add Operator</button>
-                <button className="btn btn-secondary" onClick={() => navigate('/admin/operators')}>Manage Operators</button>
-                <button className="btn btn-secondary" onClick={handleLogout}>Logout</button>
-            </div>
-        </div>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <div>
+              <h1 style={{ fontSize: '1.875rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Overview</h1>
+              <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>Overview of your payroll, team, and upcoming pay run.</p>
+          </div>
+          <div className="flex gap-2">
+              <button className="btn btn-primary" onClick={handleOpenPayroll}>Run All Payroll</button>
+              <button className="btn btn-secondary" onClick={() => setShow1099Modal(true)}>Year-End Tax (1099)</button>
+              <button className="btn btn-secondary" onClick={() => setShowAddOpModal(true)}>Add Operator</button>
+          </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+          {/* Total Pending Payout */}
+          <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                  <div style={{ 
+                      width: '40px', height: '40px', borderRadius: '8px', 
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)', color: 'var(--accent-primary)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                  }}>
+                      <FileText size={20} />
+                  </div>
+              </div>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Total Pending Payout</div>
+              <div style={{ fontSize: '1.875rem', fontWeight: 700, color: 'var(--text-primary)' }}>${pendingPayoutTotal.toFixed(2)}</div>
+          </div>
+          
+          {/* Active Employees */}
+          <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                  <div style={{ 
+                      width: '40px', height: '40px', borderRadius: '8px', 
+                      backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--status-paid)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                  }}>
+                      <Users size={20} />
+                  </div>
+              </div>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Active Operators</div>
+              <div style={{ fontSize: '1.875rem', fontWeight: 700, color: 'var(--text-primary)' }}>{activeOpsCount}</div>
+          </div>
+
+          {/* Pending Verification */}
+          <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                  <div style={{ 
+                      width: '40px', height: '40px', borderRadius: '8px', 
+                      backgroundColor: 'rgba(245, 158, 11, 0.1)', color: 'var(--status-pending)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                  }}>
+                      <MessageSquare size={20} />
+                  </div>
+              </div>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Pending Review</div>
+              <div style={{ fontSize: '1.875rem', fontWeight: 700, color: 'var(--text-primary)' }}>{pendingCount}</div>
+          </div>
+      </div>
   
         <div className="glass-card mt-4">
           <h3>Pending Batches (Requires Review)</h3>
@@ -829,7 +846,6 @@ export default function AdminDashboard() {
                 </div>
             </div>
         )}
-      </div>
     </div>
   );
 }

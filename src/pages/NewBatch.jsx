@@ -98,11 +98,7 @@ export default function NewBatch() {
   };
 
   return (
-    <div className="container mt-8">
-      <div className="flex justify-between items-center mb-4">
-        <h2>New Batch Submission</h2>
-        <button className="btn btn-secondary" onClick={() => navigate('/operator')}>Back</button>
-      </div>
+    <div>
 
       <div className="flex gap-4 mb-6">
         <button 

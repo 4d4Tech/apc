@@ -4,7 +4,7 @@ import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, FileText, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 
 export default function OperatorDashboard() {
@@ -54,50 +54,68 @@ export default function OperatorDashboard() {
     .filter(b => ['pending', 'verified', 'processing'].includes(b.status))
     .reduce((acc, batch) => acc + getBatchPayout(batch), 0);
 
-  const handleLogout = async () => {
-    await signOut(auth);
-    navigate('/login');
-  };
-
   return (
-    <div className="container mt-8">
-      <div className="flex justify-between items-center mb-4 flex-responsive">
-        <h2>Operator Dashboard</h2>
-        <button className="btn btn-secondary" onClick={handleLogout}>Logout</button>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <div>
+              <h1 style={{ fontSize: '1.875rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Overview</h1>
+              <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>Overview of your recent batches and pending pay.</p>
+          </div>
+          <div className="flex gap-2">
+              <button className="btn btn-primary" onClick={() => navigate('/operator/new-batch')}>
+                  + New Batch Submission
+              </button>
+              <button className="btn btn-secondary" onClick={() => alert('Tax documents will be generated and available here at year end.')}>
+                  Tax Documents (1099)
+              </button>
+          </div>
       </div>
       
-      <div className="flex gap-4 mb-4 flex-responsive">
-        <div className="glass-card" style={{ flex: 1 }}>
-          <div className="form-label">Total Boots (All Time)</div>
-          <h3>{totalBoots}</h3>
-        </div>
-        <div className="glass-card" style={{ flex: 1 }}>
-          <div className="form-label">Pending Pay</div>
-          <h3>${pendingPay.toFixed(2)}</h3>
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+          {/* Total Boots */}
+          <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                  <div style={{ 
+                      width: '40px', height: '40px', borderRadius: '8px', 
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)', color: 'var(--accent-primary)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                  }}>
+                      <CheckCircle size={20} />
+                  </div>
+              </div>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Total Boots (All Time)</div>
+              <div style={{ fontSize: '1.875rem', fontWeight: 700, color: 'var(--text-primary)' }}>{totalBoots}</div>
+          </div>
+          
+          {/* Pending Pay */}
+          <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                  <div style={{ 
+                      width: '40px', height: '40px', borderRadius: '8px', 
+                      backgroundColor: 'rgba(245, 158, 11, 0.1)', color: 'var(--status-pending)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                  }}>
+                      <Clock size={20} />
+                  </div>
+              </div>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Pending Pay</div>
+              <div style={{ fontSize: '1.875rem', fontWeight: 700, color: 'var(--text-primary)' }}>${pendingPay.toFixed(2)}</div>
+          </div>
       </div>
 
-      <div className="flex gap-4 mb-4 flex-responsive">
-        <button className="btn btn-primary" onClick={() => navigate('/operator/new-batch')} style={{ flex: 1 }}>
-          + New Batch Submission
-        </button>
-        <button className="btn btn-secondary" onClick={() => alert('Tax documents will be generated and available here at year end.')} style={{ flex: 1 }}>
-          Tax Documents (1099)
-        </button>
-      </div>
-
-      <h3>Recent Batches</h3>
-      {loading ? (
-        <div className="flex flex-col gap-2 mt-4">
-           <SkeletonLoader type="card" />
-           <SkeletonLoader type="card" />
-           <SkeletonLoader type="card" />
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2 mt-4">
-          {batches.length === 0 ? <p>No batches found.</p> : null}
-          {batches.map(batch => (
-            <div key={batch.id} className="glass-card flex justify-between items-center flex-stack-mobile">
+      <div className="glass-card">
+        <h3 style={{ marginBottom: '1rem' }}>Recent Batches</h3>
+        {loading ? (
+          <div className="flex flex-col gap-2 mt-4">
+             <SkeletonLoader type="card" />
+             <SkeletonLoader type="card" />
+             <SkeletonLoader type="card" />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {batches.length === 0 ? <p style={{ color: 'var(--text-secondary)' }}>No batches found.</p> : null}
+            {batches.map(batch => (
+              <div key={batch.id} className="glass-card flex justify-between items-center flex-stack-mobile" style={{ padding: '1rem', backgroundColor: 'var(--bg-primary)', boxShadow: 'none' }}>
               <div>
                 <div style={{ fontWeight: 500 }}>{batch.date ? new Date(batch.date.seconds ? batch.date.seconds * 1000 : batch.date).toLocaleDateString() : 'N/A'}</div>
                 <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
@@ -129,8 +147,9 @@ export default function OperatorDashboard() {
               </div>
             </div>
           ))}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

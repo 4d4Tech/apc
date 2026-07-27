@@ -11,6 +11,7 @@ import BatchDetails from './pages/BatchDetails';
 import AdminDashboard from './pages/AdminDashboard';
 import OperatorManagement from './pages/OperatorManagement';
 import Onboarding from './pages/Onboarding';
+import Layout from './components/Layout';
 
 const ProtectedRoute = ({ children, requiredRole }) => {
   const { currentUser, userClaims, userData, loading } = useAuth();
@@ -49,29 +50,29 @@ function App() {
           } />
           <Route path="/operator" element={
             <ProtectedRoute requiredRole="operator">
-              <OperatorDashboard />
+              <Layout><OperatorDashboard /></Layout>
             </ProtectedRoute>
           } />
           <Route path="/operator/new-batch" element={
             <ProtectedRoute requiredRole="operator">
-              <NewBatch />
+              <Layout><NewBatch /></Layout>
             </ProtectedRoute>
           } />
           <Route path="/operator/batch/:batchId" element={
             <ProtectedRoute requiredRole="operator">
-              <BatchDetails />
+              <Layout><BatchDetails /></Layout>
             </ProtectedRoute>
           } />
 
           {/* Admin Routes */}
           <Route path="/admin" element={
             <ProtectedRoute requiredRole="admin">
-              <AdminDashboard />
+              <Layout><AdminDashboard /></Layout>
             </ProtectedRoute>
           } />
           <Route path="/admin/operators" element={
             <ProtectedRoute requiredRole="admin">
-              <OperatorManagement />
+              <Layout><OperatorManagement /></Layout>
             </ProtectedRoute>
           } />
 

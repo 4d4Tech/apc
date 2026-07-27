@@ -255,13 +255,13 @@ export default function BatchDetails() {
   };
 
   if (loading) return (
-    <div className="container mt-8">
+    <div>
       <SkeletonLoader type="block" />
       <div className="mt-4"><SkeletonLoader type="card" /></div>
       <div className="mt-4"><SkeletonLoader type="card" /></div>
     </div>
   );
-  if (!batch) return <div className="container mt-8">Batch not found.</div>;
+  if (!batch) return <div>Batch not found.</div>;
 
   const isMatched = transactions.length === batch.expectedItemCount;
 
@@ -276,13 +276,13 @@ export default function BatchDetails() {
   }
 
   return (
-    <div className="container mt-8 pb-8">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="flex items-center gap-2">
-            <button className="btn btn-secondary" style={{padding: '0.5rem'}} onClick={() => navigate('/operator')}><ChevronLeft size={20}/></button>
-            Batch Details
-        </h2>
-        <div className={`badge badge-${batch.status}`}>{batch.status}</div>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <div>
+              <button className="btn btn-secondary" style={{padding: '0.25rem 0.75rem', marginBottom: '0.5rem', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.25rem'}} onClick={() => navigate('/operator')}><ChevronLeft size={16}/> Back</button>
+              <h1 style={{ fontSize: '1.875rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Batch Details</h1>
+          </div>
+          <div className={`badge badge-${batch.status}`}>{batch.status}</div>
       </div>
 
       {batch.status === 'rejected' && batch.reviewNotes && (

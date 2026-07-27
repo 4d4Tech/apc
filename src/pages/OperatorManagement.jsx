@@ -112,10 +112,12 @@ export default function OperatorManagement() {
   };
 
   return (
-    <div className="container mt-8">
-      <div className="flex items-center gap-4 mb-4">
-        <button className="btn btn-secondary" style={{padding: '0.5rem'}} onClick={() => navigate('/admin')}><ChevronLeft size={20}/></button>
-        <h2>Operator Management</h2>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <div>
+              <h1 style={{ fontSize: '1.875rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Employees</h1>
+              <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>Manage your team, salaries, and employment details.</p>
+          </div>
       </div>
 
       <div className="glass-card mt-4">
