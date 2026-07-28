@@ -375,7 +375,11 @@ exports.generate1099 = onCall(async (request) => {
                     operatorId,
                     name: opDoc.data().name,
                     email: opDoc.data().email,
-                    ssnOrEin: ssn ? `***-**-${ssn.slice(-4)}` : 'N/A',
+                    streetAddress: opDoc.data().streetAddress || '',
+                    city: opDoc.data().city || '',
+                    state: opDoc.data().state || '',
+                    zip: opDoc.data().zip || '',
+                    ssnOrEin: ssn || '',
                     ytdTotal
                 });
             }

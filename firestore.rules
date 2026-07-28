@@ -4,6 +4,12 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, write: if request.auth != null && (request.auth.uid == uid || request.auth.token.admin == true);
     }
+    
+    match /published_1099s/{docId} {
+      allow read: if request.auth != null && (resource == null || resource.data.operatorId == request.auth.uid || request.auth.token.admin == true);
+      allow write: if request.auth != null && request.auth.token.admin == true;
+    }
+    
     match /batches/{batchId} {
       allow read, write: if request.auth != null && (resource == null || resource.data.operatorId == request.auth.uid || request.auth.token.admin == true);
       

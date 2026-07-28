@@ -290,9 +290,9 @@ export const generate1099PDF = async (data, year) => {
   doc.text(`For calendar year ${year}`, 18, 44);
 
   doc.setFontSize(8);
-  doc.text('Copy B For Recipient', 150, 26);
-  doc.text('This is important tax information and is being', 150, 34);
-  doc.text('furnished to the Internal Revenue Service.', 150, 38);
+  doc.text('Copy B For Recipient', 125, 26);
+  doc.text('This is important tax information and is being', 125, 34);
+  doc.text('furnished to the Internal Revenue Service.', 125, 38);
 
   // Horizontal Lines
   doc.line(15, 48, 200, 48); // Below Title
@@ -327,15 +327,17 @@ export const generate1099PDF = async (data, year) => {
   doc.setFont('helvetica', 'normal');
   doc.text("Street address (including apt. no.)", 18, 97);
   doc.setFontSize(9);
-  doc.text(data.email || "No address on file", 18, 102);
+  doc.text(data.streetAddress || "No street address on file", 18, 102);
   doc.setFontSize(7);
   doc.text("City or town, state or province, country, and ZIP or foreign postal code", 18, 107);
-
+  doc.setFontSize(9);
+  const cityStateZip = [data.city, data.state, data.zip].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' $1'); // Format: City, State Zip
+  doc.text(cityStateZip || "No city/state/zip on file", 18, 112);
   // SSN/EIN Box (Top Right under title, next to Payer)
   // Let's create an SSN box
   doc.line(120, 63, 200, 63);
   doc.line(120, 78, 200, 78);
-  doc.line(160, 48, 160, 63); // Vertical separator for TINs
+  doc.line(160, 48, 160, 78); // Vertical separator for TINs and Box 1/2
   
   doc.setFontSize(7);
   doc.text("PAYER'S TIN", 122, 52);
@@ -348,18 +350,19 @@ export const generate1099PDF = async (data, year) => {
   doc.text(data.ssnOrEin || "N/A", 162, 58);
 
   // Box 1
-  doc.setFontSize(8);
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
-  doc.text("1 Nonemployee compensation", 122, 67);
+  doc.text("1 Nonemployee", 122, 67);
+  doc.text("compensation", 122, 70);
   doc.setFontSize(12);
-  doc.text(`$${(data.ytdTotal || 0).toFixed(2)}`, 122, 74);
+  doc.text(`$${(data.ytdTotal || 0).toFixed(2)}`, 122, 76);
 
   // Other empty boxes
   doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
-  doc.text("2 Payer made direct sales of $5,000 or", 162, 67);
-  doc.text("more of consumer products to a buyer", 162, 71);
-  doc.text("(recipient) for resale", 162, 75);
+  doc.text("2 Payer made direct sales of", 162, 67);
+  doc.text("$5,000 or more of consumer", 162, 71);
+  doc.text("products to a buyer for resale", 162, 75);
 
   doc.text("4 Federal income tax withheld", 122, 82);
   doc.text("$0.00", 122, 88);

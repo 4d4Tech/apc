@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, getDocs, doc, updateDoc, getDoc, where } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, doc, updateDoc, getDoc, where, setDoc, serverTimestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, auth, functions } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { generatePaystubPDF, generate1099PDF } from '../utils/pdfGenerator';
-import { MessageSquare, Archive, FileText, Eye, Users, Download, Images, User, Calendar, Trash2 } from 'lucide-react';
+import { MessageSquare, Archive, FileText, Eye, Users, Download, Images, User, Calendar, Trash2, Send } from 'lucide-react';
 
 const getSafeDate = (d) => {
     if (!d) return null;
@@ -49,6 +49,8 @@ export default function AdminDashboard() {
   const [show1099Modal, setShow1099Modal] = useState(false);
   const [year1099, setYear1099] = useState(new Date().getFullYear());
   const [downloading1099Id, setDownloading1099Id] = useState(null);
+  const [publishing1099Id, setPublishing1099Id] = useState(null);
+  const [published1099s, setPublished1099s] = useState({});
   const [taxResults, setTaxResults] = useState(null);
   const [isDownloadingPaystub, setIsDownloadingPaystub] = useState(false);
   const [paystubPdfData, setPaystubPdfData] = useState(null);
@@ -262,14 +264,37 @@ export default function AdminDashboard() {
       e.preventDefault();
       setIsGenerating1099(true);
       setTaxResults(null);
+      setPublished1099s({});
       try {
           const gen1099Fn = httpsCallable(functions, 'generate1099');
           const res = await gen1099Fn({ year: year1099 });
+          
+          const pubSnap = await getDocs(query(collection(db, 'published_1099s'), where('year', '==', Number(year1099))));
+          const pubMap = {};
+          pubSnap.forEach(d => { pubMap[d.data().operatorId] = true; });
+          setPublished1099s(pubMap);
+
           setTaxResults(res.data.data);
       } catch (err) {
           alert("Error generating 1099s: " + err.message);
       } finally {
           setIsGenerating1099(false);
+      }
+  };
+
+  const handlePublish1099 = async (operator) => {
+      try {
+          setPublishing1099Id(operator.operatorId);
+          await setDoc(doc(db, 'published_1099s', `${operator.operatorId}_${year1099}`), {
+              ...operator,
+              year: Number(year1099),
+              publishedAt: serverTimestamp()
+          });
+          setPublished1099s(prev => ({ ...prev, [operator.operatorId]: true }));
+      } catch (err) {
+          alert("Error publishing 1099: " + err.message);
+      } finally {
+          setPublishing1099Id(null);
       }
   };
 
@@ -931,9 +956,20 @@ export default function AdminDashboard() {
                                                     onClick={() => handleDownload1099(r)}
                                                     disabled={downloading1099Id === r.operatorId}
                                                     style={{ padding: '0.5rem 0.75rem', fontSize: '0.75rem' }}
+                                                    title="Download PDF"
                                                 >
                                                     <Download size={14} />
-                                                    {downloading1099Id === r.operatorId ? 'Generating...' : '1099-NEC Form'}
+                                                    {downloading1099Id === r.operatorId ? 'Generating...' : '1099-NEC'}
+                                                </button>
+                                                <button 
+                                                    className={`btn flex items-center gap-2 ${published1099s[r.operatorId] ? 'btn-secondary' : 'btn-primary'}`} 
+                                                    onClick={() => handlePublish1099(r)}
+                                                    disabled={publishing1099Id === r.operatorId || published1099s[r.operatorId]}
+                                                    style={{ padding: '0.5rem 0.75rem', fontSize: '0.75rem' }}
+                                                    title="Publish to Operator Dashboard"
+                                                >
+                                                    <Send size={14} />
+                                                    {published1099s[r.operatorId] ? 'Published' : (publishing1099Id === r.operatorId ? 'Publishing...' : 'Publish')}
                                                 </button>
                                             </div>
                                         </div>
