@@ -41,6 +41,10 @@
   padding: 0;
 }
 
+.mobile-only {
+  display: none !important;
+}
+
 body {
   font-family: var(--font-family);
   background-color: var(--bg-primary);
@@ -335,6 +339,10 @@ tr:last-child td {
     display: none !important;
   }
   
+  .mobile-only {
+    display: block !important;
+  }
+  
   .icon-btn-mobile {
     padding: 0.5rem !important;
     min-width: unset !important;
@@ -373,9 +381,27 @@ tr:last-child td {
     width: 100%;
   }
   
-  /* Stack certain internal flex rows on mobile */
   .flex-stack-mobile {
     flex-direction: column !important;
-    align-items: flex-start !important;
+    align-items: stretch !important;
+    gap: 0.75rem !important;
+  }
+  
+  .flex-stack-mobile > div {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    width: 100% !important;
+    text-align: right !important;
+  }
+  
+  .flex-stack-mobile > div::before {
+    content: attr(data-label);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-right: 1rem;
+    text-align: left;
   }
 }

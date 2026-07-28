@@ -136,54 +136,57 @@ export default function OperatorManagement() {
 
       <div className="glass-card mt-4">
         {loading ? <div className="spinner mt-4"></div> : (
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Phone Number</th>
-                  <th>Pay Rate</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {operators.map(op => (
-                  <tr key={op.id} className="table-row-hover">
-                    <td>
-                        <div style={{ fontWeight: 600 }}>{`${op.firstName || ''} ${op.lastName || ''}`.trim() || op.name || 'Unknown Operator'}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)'}}>UID: {op.id.slice(0, 8)}...</div>
-                    </td>
-                    <td>{op.email || 'N/A'}</td>
-                    <td>{op.phone || 'N/A'}</td>
-                    <td style={{ fontWeight: 600 }}>${Number(op.ratePerBoot || 0).toFixed(2)}/boot</td>
-                    <td>
-                        <div className="flex gap-2">
-                            <button 
-                                className="btn btn-secondary" 
-                                style={{ padding: '0.5rem' }} 
-                                onClick={() => handleOpenEdit(op)}
-                                title="Edit Operator"
-                            >
-                                <Edit2 size={16} />
-                            </button>
-                            <button 
-                                className="btn btn-secondary" 
-                                style={{ padding: '0.5rem' }} 
-                                onClick={() => handleOpenHistory(op)}
-                                title="View History"
-                            >
-                                <History size={16} />
-                            </button>
-                        </div>
-                    </td>
-                  </tr>
-                ))}
-                {operators.length === 0 && (
-                    <tr><td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No operators found.</td></tr>
-                )}
-              </tbody>
-            </table>
+          <div className="flex flex-col gap-2">
+            {/* Header */}
+            <div className="flex justify-between items-center px-4 py-2 hidden-mobile" style={{ borderBottom: '1px solid var(--border-color)', fontWeight: 600, color: 'var(--text-secondary)', fontSize: '0.875rem', textTransform: 'uppercase' }}>
+              <div style={{ flex: 2 }}>Name</div>
+              <div style={{ flex: 2 }}>Email</div>
+              <div style={{ flex: 2 }}>Phone Number</div>
+              <div style={{ flex: 1 }}>Pay Rate</div>
+              <div style={{ flex: 1 }}>Actions</div>
+            </div>
+            
+            {/* Body */}
+            {operators.map(op => (
+              <div key={op.id} className="glass-card flex justify-between items-center flex-stack-mobile" style={{ padding: '1rem', boxShadow: 'none', backgroundColor: 'var(--bg-primary)', gap: '1rem' }}>
+                <div data-label="Name" style={{ flex: 2, minWidth: '150px' }}>
+                    <div style={{ fontWeight: 600 }}>{`${op.firstName || ''} ${op.lastName || ''}`.trim() || op.name || 'Unknown Operator'}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)'}}>UID: {op.id.slice(0, 8)}...</div>
+                </div>
+                <div data-label="Email" style={{ flex: 2, minWidth: '150px' }}>
+                    {op.email || 'N/A'}
+                </div>
+                <div data-label="Phone" style={{ flex: 2, minWidth: '120px' }}>
+                    {op.phone || 'N/A'}
+                </div>
+                <div data-label="Pay Rate" style={{ flex: 1, fontWeight: 600, minWidth: '100px' }}>
+                    ${Number(op.ratePerBoot || 0).toFixed(2)}/boot
+                </div>
+                <div data-label="Actions" style={{ flex: 1, minWidth: '80px' }}>
+                    <div className="flex gap-2">
+                        <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '0.5rem' }} 
+                            onClick={() => handleOpenEdit(op)}
+                            title="Edit Operator"
+                        >
+                            <Edit2 size={16} />
+                        </button>
+                        <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '0.5rem' }} 
+                            onClick={() => handleOpenHistory(op)}
+                            title="View History"
+                        >
+                            <History size={16} />
+                        </button>
+                    </div>
+                </div>
+              </div>
+            ))}
+            {operators.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>No operators found.</div>
+            )}
           </div>
         )}
       </div>
@@ -301,45 +304,47 @@ export default function OperatorManagement() {
                   {historyLoading ? (
                       <div className="spinner my-8 mx-auto"></div>
                   ) : (
-                      <div className="table-container">
+                      <div className="flex flex-col gap-2">
                           {operatorBatches.length === 0 ? (
                               <p className="text-center" style={{ color: 'var(--text-secondary)' }}>No financial history found.</p>
                           ) : (
-                              <table>
-                                  <thead>
-                                      <tr>
-                                          <th>Date</th>
-                                          <th>Boots</th>
-                                          <th>Status</th>
-                                          <th>Payout</th>
-                                      </tr>
-                                  </thead>
-                                  <tbody>
-                                      {operatorBatches.map(batch => (
-                                          <tr key={batch.id} className="table-row-hover">
-                                              <td>
-                                                  {batch.paidAt ? (
-                                                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                          <span>{new Date(batch.paidAt.seconds ? batch.paidAt.seconds * 1000 : batch.paidAt).toLocaleDateString()}</span>
-                                                          <span style={{ fontSize: '0.75rem', color: 'var(--status-paid)' }}>Paid</span>
-                                                      </div>
-                                                  ) : (
-                                                      batch.date ? new Date(batch.date.seconds ? batch.date.seconds * 1000 : batch.date).toLocaleDateString() : 'N/A'
-                                                  )}
-                                              </td>
-                                              <td>{batch.expectedItemCount || 0}</td>
-                                              <td>
-                                                  <span className={`badge badge-${batch.status}`}>
-                                                      {batch.status}
-                                                  </span>
-                                              </td>
-                                              <td style={{ fontWeight: 600, color: 'var(--status-paid)' }}>
-                                                  ${(batch.finalPayoutAmount || 0).toFixed(2)}
-                                              </td>
-                                          </tr>
-                                      ))}
-                                  </tbody>
-                              </table>
+                              <>
+                                {/* Header */}
+                                <div className="flex justify-between items-center px-4 py-2 hidden-mobile" style={{ borderBottom: '1px solid var(--border-color)', fontWeight: 600, color: 'var(--text-secondary)', fontSize: '0.875rem', textTransform: 'uppercase' }}>
+                                    <div style={{ flex: 1 }}>Date</div>
+                                    <div style={{ flex: 1 }}>Boots</div>
+                                    <div style={{ flex: 1, textAlign: 'center' }}>Status</div>
+                                    <div style={{ flex: 1, textAlign: 'right' }}>Payout</div>
+                                </div>
+                                {/* Body */}
+                                {operatorBatches.map(batch => (
+                                    <div key={batch.id} className="glass-card flex justify-between items-center flex-stack-mobile" style={{ padding: '1rem', boxShadow: 'none', backgroundColor: 'var(--bg-primary)', gap: '1rem' }}>
+                                        <div data-label="Date" style={{ flex: 1, minWidth: '100px' }}>
+                                            {batch.paidAt ? (
+                                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                    <span style={{ fontWeight: 500 }}>{new Date(batch.paidAt.seconds ? batch.paidAt.seconds * 1000 : batch.paidAt).toLocaleDateString()}</span>
+                                                    <span style={{ fontSize: '0.75rem', color: 'var(--status-paid)' }}>Paid</span>
+                                                </div>
+                                            ) : (
+                                                <span style={{ fontWeight: 500 }}>
+                                                    {batch.date ? new Date(batch.date.seconds ? batch.date.seconds * 1000 : batch.date).toLocaleDateString() : 'N/A'}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div data-label="Boots" style={{ flex: 1, minWidth: '80px', color: 'var(--text-secondary)' }}>
+                                            {batch.expectedItemCount || 0} boots
+                                        </div>
+                                        <div data-label="Status" style={{ flex: 1, minWidth: '100px', display: 'flex', justifyContent: 'center' }}>
+                                            <span className={`badge badge-${batch.status}`}>
+                                                {batch.status}
+                                            </span>
+                                        </div>
+                                        <div data-label="Payout" style={{ flex: 1, minWidth: '80px', textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)' }}>
+                                            ${(batch.finalPayoutAmount || 0).toFixed(2)}
+                                        </div>
+                                    </div>
+                                ))}
+                              </>
                           )}
                       </div>
                   )}
