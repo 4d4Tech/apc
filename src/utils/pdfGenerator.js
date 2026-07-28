@@ -260,3 +260,116 @@ export const generatePaystubPDF = async (data) => {
     filename
   };
 };
+
+export const generate1099PDF = async (data, year) => {
+  const { jsPDF } = await import('jspdf');
+  
+  // Create a portrait, letter-sized document
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
+
+  // 1099-NEC standard red is usually around (220, 0, 0), but black is often acceptable for software-generated copies (Copy B).
+  const formColor = [0, 0, 0];
+  
+  doc.setDrawColor(...formColor);
+  doc.setTextColor(...formColor);
+
+  // Outline of the form (top part)
+  doc.setLineWidth(0.5);
+  doc.rect(15, 20, 185, 95);
+
+  // Form Title Section
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text('1099-NEC', 18, 30);
+  
+  doc.setFontSize(12);
+  doc.text('Nonemployee Compensation', 18, 36);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`For calendar year ${year}`, 18, 44);
+
+  doc.setFontSize(8);
+  doc.text('Copy B For Recipient', 150, 26);
+  doc.text('This is important tax information and is being', 150, 34);
+  doc.text('furnished to the Internal Revenue Service.', 150, 38);
+
+  // Horizontal Lines
+  doc.line(15, 48, 200, 48); // Below Title
+  doc.line(15, 78, 120, 78); // Below Payer
+  doc.line(15, 93, 120, 93); // Below Recipient
+
+  // Vertical Lines
+  doc.line(120, 48, 120, 115); // Separates Payer/Recipient from Boxes
+
+  // Payer Information
+  doc.setFontSize(7);
+  doc.text("PAYER'S name, street address, city or town, state or province, country, ZIP", 18, 52);
+  doc.text("or foreign postal code, and telephone no.", 18, 55);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text("Austin Parking Company", 18, 62);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text("Double Creek Dr", 18, 67);
+  doc.text("Austin, TX", 18, 72);
+  doc.text("(737) 300-9585", 18, 76);
+
+  // Recipient Information
+  doc.setFontSize(7);
+  doc.text("RECIPIENT'S name", 18, 82);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(data.name || "N/A", 18, 88);
+
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.text("Street address (including apt. no.)", 18, 97);
+  doc.setFontSize(9);
+  doc.text(data.email || "No address on file", 18, 102);
+  doc.setFontSize(7);
+  doc.text("City or town, state or province, country, and ZIP or foreign postal code", 18, 107);
+
+  // SSN/EIN Box (Top Right under title, next to Payer)
+  // Let's create an SSN box
+  doc.line(120, 63, 200, 63);
+  doc.line(120, 78, 200, 78);
+  doc.line(160, 48, 160, 63); // Vertical separator for TINs
+  
+  doc.setFontSize(7);
+  doc.text("PAYER'S TIN", 122, 52);
+  doc.setFontSize(9);
+  doc.text("XX-XXXXXXX", 122, 58);
+
+  doc.setFontSize(7);
+  doc.text("RECIPIENT'S TIN", 162, 52);
+  doc.setFontSize(9);
+  doc.text(data.ssnOrEin || "N/A", 162, 58);
+
+  // Box 1
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.text("1 Nonemployee compensation", 122, 67);
+  doc.setFontSize(12);
+  doc.text(`$${(data.ytdTotal || 0).toFixed(2)}`, 122, 74);
+
+  // Other empty boxes
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.text("2 Payer made direct sales of $5,000 or", 162, 67);
+  doc.text("more of consumer products to a buyer", 162, 71);
+  doc.text("(recipient) for resale", 162, 75);
+
+  doc.text("4 Federal income tax withheld", 122, 82);
+  doc.text("$0.00", 122, 88);
+
+  doc.text("Department of the Treasury - Internal Revenue Service", 60, 120);
+
+  const filename = `1099-NEC_${data.name.replace(/ /g, '_')}_${year}.pdf`;
+  
+  return {
+    url: doc.output('bloburl'),
+    filename
+  };
+};

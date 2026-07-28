@@ -4,7 +4,7 @@ import { httpsCallable } from 'firebase/functions';
 import { db, auth, functions } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { generatePaystubPDF } from '../utils/pdfGenerator';
+import { generatePaystubPDF, generate1099PDF } from '../utils/pdfGenerator';
 import { MessageSquare, Archive, FileText, Eye, Users, Download, Images, User, Calendar, Trash2 } from 'lucide-react';
 
 const getSafeDate = (d) => {
@@ -48,6 +48,7 @@ export default function AdminDashboard() {
   const [isGenerating1099, setIsGenerating1099] = useState(false);
   const [show1099Modal, setShow1099Modal] = useState(false);
   const [year1099, setYear1099] = useState(new Date().getFullYear());
+  const [downloading1099Id, setDownloading1099Id] = useState(null);
   const [taxResults, setTaxResults] = useState(null);
   const [isDownloadingPaystub, setIsDownloadingPaystub] = useState(false);
   const [paystubPdfData, setPaystubPdfData] = useState(null);
@@ -266,10 +267,28 @@ export default function AdminDashboard() {
           const res = await gen1099Fn({ year: year1099 });
           setTaxResults(res.data.data);
       } catch (err) {
-          console.error(err);
           alert("Error generating 1099s: " + err.message);
       } finally {
           setIsGenerating1099(false);
+      }
+  };
+
+  const handleDownload1099 = async (operator) => {
+      try {
+          setDownloading1099Id(operator.operatorId);
+          const pdfData = {
+              ...operator,
+              year: year1099
+          };
+          const pdf = await generate1099PDF(pdfData, year1099);
+          const link = document.createElement('a');
+          link.href = pdf.url;
+          link.download = pdf.filename;
+          link.click();
+      } catch (err) {
+          alert("Error generating 1099: " + err.message);
+      } finally {
+          setDownloading1099Id(null);
       }
   };
 
@@ -898,12 +917,25 @@ export default function AdminDashboard() {
                             <div className="flex flex-col gap-2">
                                 {taxResults.map(r => (
                                     <div key={r.operatorId} className="glass-card" style={{ padding: '0.75rem', backgroundColor: 'rgba(255,255,255,0.02)' }}>
-                                        <div className="flex justify-between" style={{fontWeight: 600}}>
-                                            <span>{r.name}</span>
-                                            <span style={{color: 'var(--status-paid)'}}>${r.ytdTotal.toFixed(2)}</span>
-                                        </div>
-                                        <div style={{fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
-                                            {r.email} | SSN/EIN: {r.ssnOrEin}
+                                        <div className="flex justify-between items-center" style={{fontWeight: 600}}>
+                                            <div>
+                                                <span>{r.name}</span>
+                                                <div style={{fontSize: '0.875rem', color: 'var(--text-secondary)', fontWeight: 400}}>
+                                                    {r.email} | SSN/EIN: {r.ssnOrEin}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-4">
+                                                <span style={{color: 'var(--status-paid)'}}>${r.ytdTotal.toFixed(2)}</span>
+                                                <button 
+                                                    className="btn btn-secondary flex items-center gap-2" 
+                                                    onClick={() => handleDownload1099(r)}
+                                                    disabled={downloading1099Id === r.operatorId}
+                                                    style={{ padding: '0.5rem 0.75rem', fontSize: '0.75rem' }}
+                                                >
+                                                    <Download size={14} />
+                                                    {downloading1099Id === r.operatorId ? 'Generating...' : '1099-NEC Form'}
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
