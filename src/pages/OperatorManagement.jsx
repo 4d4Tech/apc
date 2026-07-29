@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, getDocs, doc, updateDoc, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Edit2, History } from 'lucide-react';
+import { ChevronLeft, Edit2, History, UserX, UserCheck } from 'lucide-react';
 
 export default function OperatorManagement() {
   const [operators, setOperators] = useState([]);
@@ -126,6 +126,19 @@ export default function OperatorManagement() {
       }
   };
 
+  const handleToggleStatus = async (op) => {
+      const newStatus = op.status === 'inactive' ? 'active' : 'inactive';
+      if (!window.confirm(`Are you sure you want to mark ${op.firstName || op.name} as ${newStatus}?`)) return;
+      try {
+          await updateDoc(doc(db, 'users', op.id), { status: newStatus });
+          setOperators(operators.map(o => o.id === op.id ? { ...o, status: newStatus } : o));
+      } catch (err) {
+          console.error(err);
+          alert("Failed to update operator status.");
+      }
+  };
+
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
@@ -144,6 +157,7 @@ export default function OperatorManagement() {
               <div style={{ flex: 2 }}>Email</div>
               <div style={{ flex: 2 }}>Phone Number</div>
               <div style={{ flex: 1 }}>Pay Rate</div>
+              <div style={{ flex: 1 }}>Status</div>
               <div style={{ flex: 1 }}>Actions</div>
             </div>
             
@@ -163,8 +177,28 @@ export default function OperatorManagement() {
                 <div data-label="Pay Rate" style={{ flex: 1, fontWeight: 600, minWidth: '100px' }}>
                     ${Number(op.ratePerBoot || 0).toFixed(2)}/boot
                 </div>
+                <div data-label="Status" style={{ flex: 1, minWidth: '100px' }}>
+                    <span style={{
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '9999px',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        backgroundColor: op.status === 'inactive' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                        color: op.status === 'inactive' ? '#ef4444' : '#22c55e'
+                    }}>
+                        {op.status === 'inactive' ? 'Inactive' : 'Active'}
+                    </span>
+                </div>
                 <div data-label="Actions" style={{ flex: 1, minWidth: '80px' }}>
                     <div className="flex gap-2">
+                        <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '0.5rem' }} 
+                            onClick={() => handleToggleStatus(op)}
+                            title={op.status === 'inactive' ? 'Reactivate Operator' : 'Deactivate Operator'}
+                        >
+                            {op.status === 'inactive' ? <UserCheck size={16} /> : <UserX size={16} />}
+                        </button>
                         <button 
                             className="btn btn-secondary" 
                             style={{ padding: '0.5rem' }} 

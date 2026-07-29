@@ -228,26 +228,36 @@ exports.generatepaystub = onCall(async (request) => {
         const startOfYear = new Date(`${year}-01-01T00:00:00Z`);
         const endOfYear = new Date(`${year}-12-31T23:59:59Z`);
 
-        let ytdTotal = batchData.ytdAtPayrollRun || 0;
+        let ytdTotal = 0;
         
-        if (!batchData.ytdAtPayrollRun) {
-            const batchesSnap = await getFirestore().collection('batches')
-                .where('operatorId', '==', operatorId)
-                .where('status', 'in', ['paid', 'processing'])
-                .get();
+        const batchesSnap = await getFirestore().collection('batches')
+            .where('operatorId', '==', operatorId)
+            .where('status', 'in', ['paid', 'processing'])
+            .get();
 
-            batchesSnap.docs.forEach(bDoc => {
-                const b = bDoc.data();
-                // Determine the relevant date (either when payroll was run or the batch date)
-                const relevantTimestamp = b.payrollRunAt || b.date;
-                if (relevantTimestamp) {
-                    const runDate = relevantTimestamp.toDate ? relevantTimestamp.toDate() : new Date(relevantTimestamp);
-                    if (runDate >= startOfYear && runDate <= endOfYear && runDate <= batchDate) {
-                        ytdTotal += Number(b.finalPayoutAmount || b.calculatedPay || 0);
+        batchesSnap.docs.forEach(bDoc => {
+            const b = bDoc.data();
+            const relevantTimestamp = b.payrollRunAt || b.paidAt || b.date;
+            if (relevantTimestamp) {
+                const runDate = relevantTimestamp.toDate ? relevantTimestamp.toDate() : new Date(relevantTimestamp);
+                if (runDate >= startOfYear && runDate <= endOfYear && runDate <= batchDate) {
+                    if (b.finalPayoutAmount !== undefined && b.finalPayoutAmount !== null) {
+                        ytdTotal += b.finalPayoutAmount;
+                    } else {
+                        let total = b.calculatedPay || 0;
+                        if (b.adjustments && Array.isArray(b.adjustments)) {
+                            b.adjustments.forEach(adj => {
+                                const amount = Number(adj.amount) || 0;
+                                if (adj.type === 'bonus') total += amount;
+                                if (adj.type === 'reimbursement') total += amount;
+                                if (adj.type === 'deduction') total -= amount;
+                            });
+                        }
+                        ytdTotal += total;
                     }
                 }
-            });
-        }
+            }
+        });
 
         // Get transactions for daily breakdown
         const txSnap = await getFirestore().collection(`batches/${batchId}/transactions`).get();
@@ -358,10 +368,24 @@ exports.generate1099 = onCall(async (request) => {
             let ytdTotal = 0;
             batchesSnap.docs.forEach(bDoc => {
                 const b = bDoc.data();
-                if (b.payrollRunAt) {
-                    const runDate = b.payrollRunAt.toDate();
+                const relevantTimestamp = b.payrollRunAt || b.paidAt || b.date;
+                if (relevantTimestamp) {
+                    const runDate = relevantTimestamp.toDate ? relevantTimestamp.toDate() : new Date(relevantTimestamp);
                     if (runDate >= start && runDate <= end) {
-                        ytdTotal += (b.finalPayoutAmount || 0);
+                        if (b.finalPayoutAmount !== undefined && b.finalPayoutAmount !== null) {
+                            ytdTotal += b.finalPayoutAmount;
+                        } else {
+                            let total = b.calculatedPay || 0;
+                            if (b.adjustments && Array.isArray(b.adjustments)) {
+                                b.adjustments.forEach(adj => {
+                                    const amount = Number(adj.amount) || 0;
+                                    if (adj.type === 'bonus') total += amount;
+                                    if (adj.type === 'reimbursement') total += amount;
+                                    if (adj.type === 'deduction') total -= amount;
+                                });
+                            }
+                            ytdTotal += total;
+                        }
                     }
                 }
             });

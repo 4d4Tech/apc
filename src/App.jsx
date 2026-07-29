@@ -1,6 +1,8 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
+import { signOut } from 'firebase/auth';
+import { auth } from './firebase';
 import './index.css';
 
 import Login from './pages/Login';
@@ -20,6 +22,16 @@ const ProtectedRoute = ({ children, requiredRole }) => {
 
   if (!currentUser) {
     return <Navigate to="/login" />;
+  }
+
+  if (requiredRole === 'operator' && userData?.status === 'inactive') {
+    return (
+      <div style={{ textAlign: 'center', padding: '4rem 1rem' }}>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#ef4444', marginBottom: '0.5rem' }}>Account Deactivated</h2>
+        <p style={{ color: '#6b7280', marginBottom: '2rem' }}>Your operator account has been deactivated. Please contact your administrator.</p>
+        <button className="btn btn-primary" onClick={() => signOut(auth)}>Sign Out</button>
+      </div>
+    );
   }
 
   // Check claims or fallback to firestore role

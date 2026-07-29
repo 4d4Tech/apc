@@ -153,6 +153,17 @@ export default function OperatorDashboard() {
     }
   };
 
+  if (userData?.status === 'inactive') {
+    return (
+      <div style={{ textAlign: 'center', padding: '4rem 1rem' }}>
+        <AlertCircle size={48} style={{ color: '#ef4444', margin: '0 auto 1rem' }} />
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Account Deactivated</h2>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>Your operator account has been deactivated. Please contact your administrator if you believe this is an error.</p>
+        <button className="btn btn-primary" onClick={() => signOut(auth)}>Sign Out</button>
+      </div>
+    );
+  }
+
   return (
     <div>
       {published1099s.length > 0 && (
