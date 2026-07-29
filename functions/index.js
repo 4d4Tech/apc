@@ -384,7 +384,19 @@ exports.generate1099 = onCall(async (request) => {
             }
         }
 
-        return { success: true, year, generatedCount: results.length, data: results };
+        const adminDoc = await getFirestore().collection('users').doc(request.auth.uid).get();
+        const adminSecureDoc = await getFirestore().collection('admin_secure_data').doc(request.auth.uid).get();
+        const payerInfo = {
+            companyName: adminDoc.data()?.companyName || adminDoc.data()?.name || '',
+            streetAddress: adminDoc.data()?.streetAddress || '',
+            city: adminDoc.data()?.city || '',
+            state: adminDoc.data()?.state || '',
+            zip: adminDoc.data()?.zip || '',
+            phone: adminDoc.data()?.phone || '',
+            tin: adminSecureDoc.exists ? adminSecureDoc.data().tin : 'XX-XXXXXXX'
+        };
+
+        return { success: true, year, generatedCount: results.length, data: results, payerInfo };
     } catch (error) {
         console.error("Error generating 1099s:", error);
         throw new HttpsError('internal', error.message);

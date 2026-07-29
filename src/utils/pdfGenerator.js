@@ -309,12 +309,14 @@ export const generate1099PDF = async (data, year) => {
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text("Austin Parking Company", 18, 62);
+  const payerName = data.payerInfo?.companyName || "Austin Parking Company";
+  doc.text(payerName, 18, 62);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text("Double Creek Dr", 18, 67);
-  doc.text("Austin, TX", 18, 72);
-  doc.text("(737) 300-9585", 18, 76);
+  doc.text(data.payerInfo?.streetAddress || "Double Creek Dr", 18, 67);
+  const payerCityStateZip = [data.payerInfo?.city, data.payerInfo?.state, data.payerInfo?.zip].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' $1');
+  doc.text(payerCityStateZip || "Austin, TX", 18, 72);
+  doc.text(data.payerInfo?.phone || "(737) 300-9585", 18, 76);
 
   // Recipient Information
   doc.setFontSize(7);
@@ -342,7 +344,7 @@ export const generate1099PDF = async (data, year) => {
   doc.setFontSize(7);
   doc.text("PAYER'S TIN", 122, 52);
   doc.setFontSize(9);
-  doc.text("XX-XXXXXXX", 122, 58);
+  doc.text(data.payerInfo?.tin || "XX-XXXXXXX", 122, 58);
 
   doc.setFontSize(7);
   doc.text("RECIPIENT'S TIN", 162, 52);
