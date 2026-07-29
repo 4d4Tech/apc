@@ -45,7 +45,6 @@ exports.extractbatchdata = onCall(async (request) => {
         const data = JSON.parse(cleanText);
 
         return data;
-
     } catch (error) {
         console.error("AI Extraction Error:", error);
         throw new HttpsError('internal', 'Failed to extract data from image.');

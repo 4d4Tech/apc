@@ -5,7 +5,7 @@ import { db, auth, functions } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { generatePaystubPDF, generate1099PDF } from '../utils/pdfGenerator';
-import { MessageSquare, Archive, FileText, Eye, Users, Download, Images, User, Calendar, Trash2, Send } from 'lucide-react';
+import { MessageSquare, Archive, FileText, Eye, Users, Download, Images, User, Calendar, Trash2, Send, Settings } from 'lucide-react';
 
 const getSafeDate = (d) => {
     if (!d) return null;
@@ -60,12 +60,48 @@ export default function AdminDashboard() {
   const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [historyDateFilter, setHistoryDateFilter] = useState('all');
 
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [profileData, setProfileData] = useState({
+    companyName: '',
+    streetAddress: '',
+    city: '',
+    state: '',
+    zip: '',
+    phone: '',
+    tin: ''
+  });
+  const [payerInfo, setPayerInfo] = useState(null);
+
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchBatches();
     fetchOperators();
+    fetchProfile();
   }, []);
+
+  const fetchProfile = async () => {
+    if (!auth.currentUser) return;
+    try {
+      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      const secureDoc = await getDoc(doc(db, 'admin_secure_data', auth.currentUser.uid));
+      const ud = userDoc.exists() ? userDoc.data() : {};
+      const sd = secureDoc.exists() ? secureDoc.data() : {};
+      
+      setProfileData({
+        companyName: ud.companyName || '',
+        streetAddress: ud.streetAddress || '',
+        city: ud.city || '',
+        state: ud.state || '',
+        zip: ud.zip || '',
+        phone: ud.phone || '',
+        tin: sd.tin || ''
+      });
+    } catch (err) {
+      console.error("Error fetching admin profile data:", err);
+    }
+  };
 
   const fetchOperators = async () => {
     try {
@@ -274,6 +310,10 @@ export default function AdminDashboard() {
           pubSnap.forEach(d => { pubMap[d.data().operatorId] = true; });
           setPublished1099s(pubMap);
 
+          if (res.data.payerInfo) {
+              setPayerInfo(res.data.payerInfo);
+          }
+
           setTaxResults(res.data.data);
       } catch (err) {
           alert("Error generating 1099s: " + err.message);
@@ -288,6 +328,7 @@ export default function AdminDashboard() {
           await setDoc(doc(db, 'published_1099s', `${operator.operatorId}_${year1099}`), {
               ...operator,
               year: Number(year1099),
+              payerInfo: payerInfo || null,
               publishedAt: serverTimestamp()
           });
           setPublished1099s(prev => ({ ...prev, [operator.operatorId]: true }));
@@ -303,7 +344,8 @@ export default function AdminDashboard() {
           setDownloading1099Id(operator.operatorId);
           const pdfData = {
               ...operator,
-              year: year1099
+              year: year1099,
+              payerInfo: payerInfo || null
           };
           const pdf = await generate1099PDF(pdfData, year1099);
           const link = document.createElement('a');
@@ -330,10 +372,35 @@ export default function AdminDashboard() {
           }
       } catch (err) {
           console.error(err);
-          alert("Error generating paystub: " + err.message);
+          alert("Error generating paystub PDF: " + err.message);
       } finally {
           setIsDownloadingPaystub(false);
       }
+  };
+
+  const handleSaveProfile = async (e) => {
+    e.preventDefault();
+    if (!auth.currentUser) return;
+    setIsSavingProfile(true);
+    try {
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        companyName: profileData.companyName,
+        streetAddress: profileData.streetAddress,
+        city: profileData.city,
+        state: profileData.state,
+        zip: profileData.zip,
+        phone: profileData.phone
+      });
+      await setDoc(doc(db, 'admin_secure_data', auth.currentUser.uid), {
+        tin: profileData.tin
+      }, { merge: true });
+      setShowSettingsModal(false);
+      alert("Profile updated successfully.");
+    } catch (err) {
+      alert("Error updating profile: " + err.message);
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const handleSelectAllVerified = (e) => {
@@ -407,13 +474,24 @@ export default function AdminDashboard() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <div>
-              <h1 style={{ fontSize: '1.875rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Overview</h1>
-              <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>Overview of your payroll, team, and upcoming pay run.</p>
-          </div>
-          <div className="flex gap-2">
-              <button className="btn btn-primary" onClick={handleOpenPayroll}>Run All Payroll</button>
-              <button className="btn btn-secondary" onClick={() => setShow1099Modal(true)}>Year-End Tax (1099)</button>
-              <button className="btn btn-secondary" onClick={() => setShowAddOpModal(true)}>Add Operator</button>
+                <div>
+                    <h1 style={{ fontSize: '1.875rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Admin Dashboard</h1>
+                    <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>Manage batches, operators, and payroll.</p>
+                </div>
+                <div className="flex gap-2">
+                    <button className="btn btn-secondary flex items-center gap-2" onClick={() => setShowSettingsModal(true)}>
+                        <Settings size={16} /> Profile Settings
+                    </button>
+                    <button className="btn btn-primary flex items-center gap-2" onClick={() => setShowAddOpModal(true)}>
+                        <User size={16} /> Add Operator
+                    </button>
+                    <button className="btn btn-secondary" onClick={() => setShow1099Modal(true)}>
+                        Year-End Tax Forms
+                    </button>
+                    <button className="btn btn-secondary flex items-center gap-2" onClick={handleLogout}>
+                        Logout
+                    </button>
+                </div>
           </div>
       </div>
 
@@ -837,6 +915,107 @@ export default function AdminDashboard() {
                 </div>
             </div>
         )}
+
+            {showSettingsModal && (
+                <div className="modal-overlay">
+                    <div className="modal-content glass-card" style={{ maxWidth: '600px' }}>
+                        <button className="modal-close" onClick={() => setShowSettingsModal(false)}>X</button>
+                        <h3 className="mb-4">Profile Settings</h3>
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
+                            Update your company address and TIN/EIN. This information will appear as the Payer on the operators' 1099 forms.
+                        </p>
+                        <form onSubmit={handleSaveProfile} className="flex flex-col gap-4">
+                            <div className="form-group">
+                                <label>Company Name</label>
+                                <input 
+                                    type="text" 
+                                    value={profileData.companyName}
+                                    onChange={(e) => setProfileData({...profileData, companyName: e.target.value})}
+                                    className="form-input"
+                                    placeholder="Austin Parking Company"
+                                    required
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Street Address</label>
+                                <input 
+                                    type="text" 
+                                    value={profileData.streetAddress}
+                                    onChange={(e) => setProfileData({...profileData, streetAddress: e.target.value})}
+                                    className="form-input"
+                                    placeholder="123 Main St"
+                                    required
+                                />
+                            </div>
+                            <div className="flex gap-4">
+                                <div className="form-group" style={{ flex: 2 }}>
+                                    <label>City</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.city}
+                                        onChange={(e) => setProfileData({...profileData, city: e.target.value})}
+                                        className="form-input"
+                                        placeholder="Austin"
+                                        required
+                                    />
+                                </div>
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label>State</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.state}
+                                        onChange={(e) => setProfileData({...profileData, state: e.target.value})}
+                                        className="form-input"
+                                        placeholder="TX"
+                                        required
+                                    />
+                                </div>
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label>ZIP Code</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.zip}
+                                        onChange={(e) => setProfileData({...profileData, zip: e.target.value})}
+                                        className="form-input"
+                                        placeholder="78701"
+                                        required
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex gap-4">
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label>Phone Number</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.phone}
+                                        onChange={(e) => setProfileData({...profileData, phone: e.target.value})}
+                                        className="form-input"
+                                        placeholder="(737) 300-9585"
+                                        required
+                                    />
+                                </div>
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label>TIN or EIN</label>
+                                    <input 
+                                        type="text" 
+                                        value={profileData.tin}
+                                        onChange={(e) => setProfileData({...profileData, tin: e.target.value})}
+                                        className="form-input"
+                                        placeholder="XX-XXXXXXX"
+                                        required
+                                    />
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                                        Stored securely. Used for payer identification.
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem' }} disabled={isSavingProfile}>
+                                {isSavingProfile ? 'Saving...' : 'Save Profile'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
   
         {/* Add Operator Modal */}
         {showAddOpModal && (
