@@ -370,10 +370,15 @@ exports.generate1099 = onCall(async (request) => {
                 const secureDoc = await getFirestore().collection('operator_secure_data').doc(operatorId).get();
                 const ssn = secureDoc.exists ? secureDoc.data().ssn : null;
 
+                const opData = opDoc.data();
+                const fullName = (opData.firstName || opData.lastName) 
+                    ? `${opData.firstName || ''} ${opData.lastName || ''}`.trim() 
+                    : opData.name;
+
                 results.push({
                     operatorId,
-                    name: opDoc.data().name,
-                    email: opDoc.data().email,
+                    name: fullName,
+                    email: opData.email,
                     streetAddress: opDoc.data().streetAddress || '',
                     city: opDoc.data().city || '',
                     state: opDoc.data().state || '',

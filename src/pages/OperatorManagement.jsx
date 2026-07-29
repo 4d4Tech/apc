@@ -111,6 +111,7 @@ export default function OperatorManagement() {
           const updatedData = {
               firstName: editFormData.firstName,
               lastName: editFormData.lastName,
+              name: `${editFormData.firstName} ${editFormData.lastName}`.trim(),
               email: editFormData.email,
               phone: editFormData.phone,
               ratePerBoot: Number(editFormData.ratePerBoot)
