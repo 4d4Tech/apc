@@ -5,6 +5,7 @@ import { db, auth, functions } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { generatePaystubPDF, generate1099PDF } from '../utils/pdfGenerator';
+import { PaystubPreviewModal } from '../components/PaystubPreviewModal';
 import { MessageSquare, Archive, FileText, Eye, Users, Download, Images, User, Calendar, Trash2, Send, Settings } from 'lucide-react';
 
 const getSafeDate = (d) => {
@@ -379,7 +380,10 @@ export default function AdminDashboard() {
             const res = await genPaystubFn({ batchId });
             if (res.data.success) {
                 const pdfData = await generatePaystubPDF(res.data.data);
-                setPaystubPdfData(pdfData);
+                setPaystubPdfData({
+                    ...pdfData,
+                    rawData: res.data.data
+                });
             } else {
                 alert("Failed to fetch paystub data.");
             }
@@ -1196,18 +1200,10 @@ export default function AdminDashboard() {
             )}
 
             {paystubPdfData && (
-                <div className="modal-overlay" onClick={() => setPaystubPdfData(null)}>
-                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{ width: '90%', maxWidth: '800px', height: '85vh', display: 'flex', flexDirection: 'column' }}>
-                        <div className="flex justify-between items-center mb-4">
-                            <h3>Paystub Preview</h3>
-                            <div className="flex gap-4">
-                                <a href={paystubPdfData.url} download={paystubPdfData.filename} className="btn btn-primary" style={{ backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)', textDecoration: 'none', display: 'flex', alignItems: 'center' }}>Download PDF</a>
-                                <button className="btn btn-secondary" onClick={() => setPaystubPdfData(null)}>Close</button>
-                            </div>
-                        </div>
-                        <iframe src={paystubPdfData.url} style={{ width: '100%', flex: 1, border: 'none', borderRadius: '8px', backgroundColor: '#fff' }} title="Paystub Preview"></iframe>
-                    </div>
-                </div>
+                <PaystubPreviewModal
+                    pdfData={paystubPdfData}
+                    onClose={() => setPaystubPdfData(null)}
+                />
             )}
         </div>
     );

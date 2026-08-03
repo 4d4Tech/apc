@@ -405,3 +405,76 @@ tr:last-child td {
     text-align: left;
   }
 }
+
+/* Paystub Preview Modal Styles */
+.paystub-modal-overlay {
+  animation: fadeInModal 0.2s ease-out;
+}
+
+@keyframes fadeInModal {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.btn-toolbar-icon {
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.btn-toolbar-icon:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.btn-toolbar-icon.active {
+  background-color: #3b82f6;
+  color: #ffffff;
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: #e2e8f0;
+  padding: 0.25rem;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.paystub-stage::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.paystub-stage::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.paystub-stage::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.paystub-stage::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
