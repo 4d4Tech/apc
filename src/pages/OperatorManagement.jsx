@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, updateDoc, query, where, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
+import { collection, getDocs, doc, updateDoc, setDoc, serverTimestamp, query, where, orderBy } from 'firebase/firestore';
+import { db, firebaseConfig } from '../firebase';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Edit2, History, UserX, UserCheck } from 'lucide-react';
+import { ChevronLeft, Edit2, History, UserX, UserCheck, UserPlus, Plus, X } from 'lucide-react';
 
 export default function OperatorManagement() {
   const [operators, setOperators] = useState([]);
@@ -15,6 +17,21 @@ export default function OperatorManagement() {
       phone: '',
       ratePerBoot: 0
   });
+
+  // Add Employee State
+  const [isAddingEmployee, setIsAddingEmployee] = useState(false);
+  const [addFormData, setAddFormData] = useState({
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      ratePerBoot: 10,
+      password: '',
+      ssn: '',
+      status: 'active'
+  });
+  const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
+  const [addError, setAddError] = useState('');
 
   const [historyOperator, setHistoryOperator] = useState(null);
   const [operatorBatches, setOperatorBatches] = useState([]);
@@ -51,6 +68,95 @@ export default function OperatorManagement() {
   useEffect(() => {
     fetchOperators();
   }, []);
+
+  const handleOpenAddModal = () => {
+    setAddFormData({
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      ratePerBoot: 10,
+      password: '',
+      ssn: '',
+      status: 'active'
+    });
+    setAddError('');
+    setIsAddingEmployee(true);
+  };
+
+  const handleCloseAddModal = () => {
+    setIsAddingEmployee(false);
+    setAddError('');
+  };
+
+  const handleCreateEmployee = async (e) => {
+    e.preventDefault();
+    setAddError('');
+    setIsSubmittingAdd(true);
+
+    let secondaryApp = null;
+    try {
+      // 1. Create a secondary Firebase App so admin's logged-in session is undisturbed
+      const appName = `SecondaryAuth_${Date.now()}`;
+      secondaryApp = initializeApp(firebaseConfig, appName);
+      const secondaryAuth = getAuth(secondaryApp);
+
+      // 2. Create the user in Firebase Authentication
+      const userCredential = await createUserWithEmailAndPassword(
+        secondaryAuth,
+        addFormData.email.trim(),
+        addFormData.password
+      );
+      const newUser = userCredential.user;
+
+      // 3. Create the user document in Firestore 'users' collection
+      await setDoc(doc(db, 'users', newUser.uid), {
+        role: 'operator',
+        name: `${addFormData.firstName} ${addFormData.lastName}`.trim(),
+        firstName: addFormData.firstName.trim(),
+        lastName: addFormData.lastName.trim(),
+        phone: addFormData.phone.trim(),
+        email: addFormData.email.trim(),
+        payoutsEnabled: true,
+        ratePerBoot: Number(addFormData.ratePerBoot) || 10,
+        status: addFormData.status || 'active',
+        createdAt: serverTimestamp()
+      });
+
+      // 4. Optionally write to operator_secure_data if SSN provided
+      if (addFormData.ssn.trim()) {
+        await setDoc(doc(db, 'operator_secure_data', newUser.uid), {
+          ssn: addFormData.ssn.trim(),
+          w9_submitted: true,
+          updatedAt: new Date()
+        });
+      }
+
+      // 5. Cleanup & refresh
+      handleCloseAddModal();
+      await fetchOperators();
+    } catch (err) {
+      console.error("Error adding employee:", err);
+      let msg = err.message || 'Failed to create employee.';
+      if (err.code === 'auth/email-already-in-use') {
+        msg = 'An account with this email address already exists.';
+      } else if (err.code === 'auth/weak-password') {
+        msg = 'Password should be at least 6 characters long.';
+      } else if (err.code === 'auth/invalid-email') {
+        msg = 'Invalid email address format.';
+      }
+      setAddError(msg);
+    } finally {
+      if (secondaryApp) {
+        try {
+          await deleteApp(secondaryApp);
+        } catch (err) {
+          console.error("Error deleting secondary app:", err);
+        }
+      }
+      setIsSubmittingAdd(false);
+    }
+  };
 
   const handleOpenEdit = (op) => {
       setEditingOperator(op.id);
@@ -141,11 +247,14 @@ export default function OperatorManagement() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
               <h1 style={{ fontSize: '1.875rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Employees</h1>
               <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>Manage your team, salaries, and employment details.</p>
           </div>
+          <button className="btn btn-primary" onClick={handleOpenAddModal} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <UserPlus size={18} /> Add Employee
+          </button>
       </div>
 
       <div className="glass-card mt-4">
@@ -383,6 +492,130 @@ export default function OperatorManagement() {
                           )}
                       </div>
                   )}
+              </div>
+          </div>
+      )}
+
+      {/* Add Employee Modal */}
+      {isAddingEmployee && (
+          <div className="modal-overlay">
+              <div className="modal-content glass-card" style={{ maxWidth: '550px' }}>
+                  <button className="modal-close" onClick={handleCloseAddModal}>X</button>
+                  <h3 className="mb-4">Add New Employee</h3>
+                  {addError && (
+                      <div style={{ color: 'var(--status-error)', backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.875rem' }}>
+                          {addError}
+                      </div>
+                  )}
+                  <form onSubmit={handleCreateEmployee}>
+                      <div className="flex gap-4">
+                          <div className="form-group" style={{ flex: 1 }}>
+                              <label className="form-label">First Name *</label>
+                              <input 
+                                  type="text" 
+                                  className="form-input" 
+                                  required
+                                  value={addFormData.firstName} 
+                                  onChange={e => setAddFormData({...addFormData, firstName: e.target.value})} 
+                                  placeholder="John"
+                              />
+                          </div>
+                          <div className="form-group" style={{ flex: 1 }}>
+                              <label className="form-label">Last Name *</label>
+                              <input 
+                                  type="text" 
+                                  className="form-input" 
+                                  required
+                                  value={addFormData.lastName} 
+                                  onChange={e => setAddFormData({...addFormData, lastName: e.target.value})} 
+                                  placeholder="Doe"
+                              />
+                          </div>
+                      </div>
+
+                      <div className="form-group">
+                          <label className="form-label">Email Address *</label>
+                          <input 
+                              type="email" 
+                              className="form-input" 
+                              required
+                              value={addFormData.email} 
+                              onChange={e => setAddFormData({...addFormData, email: e.target.value})} 
+                              placeholder="john.doe@example.com"
+                          />
+                      </div>
+
+                      <div className="flex gap-4">
+                          <div className="form-group" style={{ flex: 1 }}>
+                              <label className="form-label">Phone Number *</label>
+                              <input 
+                                  type="tel" 
+                                  className="form-input" 
+                                  required
+                                  value={addFormData.phone} 
+                                  onChange={e => setAddFormData({...addFormData, phone: e.target.value})} 
+                                  placeholder="(512) 555-0199"
+                              />
+                          </div>
+                          <div className="form-group" style={{ flex: 1 }}>
+                              <label className="form-label">Rate Per Boot ($) *</label>
+                              <input 
+                                  type="number" 
+                                  step="0.01"
+                                  min="0"
+                                  className="form-input" 
+                                  required
+                                  value={addFormData.ratePerBoot} 
+                                  onChange={e => setAddFormData({...addFormData, ratePerBoot: e.target.value})} 
+                                  placeholder="10.00"
+                              />
+                          </div>
+                      </div>
+
+                      <div className="flex gap-4">
+                          <div className="form-group" style={{ flex: 1 }}>
+                              <label className="form-label">Account Password *</label>
+                              <input 
+                                  type="password" 
+                                  className="form-input" 
+                                  required
+                                  minLength={6}
+                                  value={addFormData.password} 
+                                  onChange={e => setAddFormData({...addFormData, password: e.target.value})} 
+                                  placeholder="Min. 6 characters"
+                              />
+                          </div>
+                          <div className="form-group" style={{ flex: 1 }}>
+                              <label className="form-label">Status</label>
+                              <select
+                                  className="form-input"
+                                  value={addFormData.status}
+                                  onChange={e => setAddFormData({...addFormData, status: e.target.value})}
+                              >
+                                  <option value="active">Active</option>
+                                  <option value="inactive">Inactive</option>
+                              </select>
+                          </div>
+                      </div>
+
+                      <div className="form-group">
+                          <label className="form-label">SSN / Tax ID <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>(Optional for 1099)</span></label>
+                          <input 
+                              type="text" 
+                              className="form-input" 
+                              value={addFormData.ssn} 
+                              onChange={e => setAddFormData({...addFormData, ssn: e.target.value})} 
+                              placeholder="XXX-XX-XXXX"
+                          />
+                      </div>
+
+                      <div className="flex justify-end gap-4 mt-6 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                          <button type="button" className="btn btn-secondary" onClick={handleCloseAddModal} disabled={isSubmittingAdd}>Cancel</button>
+                          <button type="submit" className="btn btn-primary" disabled={isSubmittingAdd}>
+                              {isSubmittingAdd ? 'Adding Employee...' : 'Create Employee'}
+                          </button>
+                      </div>
+                  </form>
               </div>
           </div>
       )}
