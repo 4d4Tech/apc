@@ -439,23 +439,42 @@ tr:last-child td {
   background-color: var(--bg-tertiary);
 }
 
-/* Mobile Responsive */
+/* Mobile Responsive (Material Design Mobile Specifications) */
 @media (max-width: 768px) {
   html, body {
     font-size: 14px;
   }
   
-  h1 { font-size: 1.5rem; }
-  h2 { font-size: 1.25rem; }
-  h3 { font-size: 1.125rem; }
-  h4 { font-size: 1rem; }
+  h1 { font-size: 1.5rem; line-height: 1.3; }
+  h2 { font-size: 1.25rem; line-height: 1.3; }
+  h3 { font-size: 1.125rem; line-height: 1.3; }
+  h4 { font-size: 1rem; line-height: 1.3; }
 
+  /* 44px Touch Targets for Mobile Controls */
   .btn {
-    height: var(--control-height);
-    padding: 0 1rem;
-    font-size: 0.875rem;
+    height: 2.75rem; /* 44px Material minimum touch height */
+    padding: 0 1.25rem;
+    font-size: 0.9375rem;
+  }
+
+  .btn-sm {
+    height: 2.25rem; /* 36px */
+    padding: 0 0.875rem;
+    font-size: 0.8125rem;
+  }
+
+  .btn-icon, .icon-btn-mobile {
+    width: 2.75rem;  /* 44px x 44px touch area */
+    height: 2.75rem;
+    padding: 0 !important;
   }
   
+  .form-input {
+    height: 2.75rem; /* 44px touch target height */
+    font-size: 0.9375rem; /* Prevents auto-zoom on mobile Safari */
+    padding: 0 0.875rem;
+  }
+
   th, td {
     padding: 0.75rem 0.5rem;
     font-size: 0.8125rem;
@@ -473,14 +492,15 @@ tr:last-child td {
     display: block !important;
   }
   
-  .container {
-    padding: 0 1rem;
+  .container, .layout-content {
+    padding: 1rem !important; /* 16px Material edge margin */
   }
   
   .flex-responsive {
     flex-direction: column !important;
     align-items: stretch !important;
-    gap: 1rem !important;
+    gap: 0.75rem !important;
+    width: 100% !important;
   }
   
   .flex-responsive > .btn,
@@ -489,14 +509,21 @@ tr:last-child td {
     width: 100% !important;
   }
 
+  .modal-overlay {
+    padding: 0.5rem !important;
+  }
+
   .modal-content {
-    width: 95% !important;
+    width: 100% !important;
+    max-height: 94vh !important;
     padding: 1.25rem !important;
-    margin: 0.5rem !important;
+    margin: 0 !important;
+    border-radius: var(--border-radius-lg) !important;
   }
   
   .glass-card {
-    padding: 1rem;
+    padding: 1rem !important;
+    border-radius: var(--border-radius-md);
   }
 
   .table-container {
@@ -527,6 +554,16 @@ tr:last-child td {
     text-transform: uppercase;
     margin-right: 1rem;
     text-align: left;
+  }
+
+  /* Mobile Paystub Preview Modal Toolbars */
+  .paystub-toolbar {
+    padding: 0.75rem !important;
+    gap: 0.5rem !important;
+  }
+
+  .paystub-stage {
+    padding: 0.75rem !important;
   }
 }
 

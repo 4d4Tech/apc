@@ -181,12 +181,12 @@ export default function OperatorDashboard() {
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h1 style={{ fontSize: '1.875rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Overview</h1>
           <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>Overview of your recent batches and pending pay.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-responsive" style={{ flexWrap: 'wrap' }}>
           <button className="btn btn-primary" onClick={() => navigate('/operator/new-batch')}>
             + New Batch Submission
           </button>

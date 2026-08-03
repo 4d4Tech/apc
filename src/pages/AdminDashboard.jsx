@@ -7,6 +7,7 @@ import { signOut } from 'firebase/auth';
 import { generatePaystubPDF, generate1099PDF } from '../utils/pdfGenerator';
 import { PaystubPreviewModal } from '../components/PaystubPreviewModal';
 import { MessageSquare, Archive, FileText, Eye, Users, Download, Images, User, Calendar, Trash2, Send, Settings } from 'lucide-react';
+import './AdminDashboard.css';
 
 const getSafeDate = (d) => {
     if (!d) return null;
@@ -35,7 +36,16 @@ export default function AdminDashboard() {
     const [selectedBatch, setSelectedBatch] = useState(null);
     const [txDetails, setTxDetails] = useState([]);
     const [showAddOpModal, setShowAddOpModal] = useState(false);
-    const [newOpData, setNewOpData] = useState({ firstName: '', lastName: '', phone: '', email: '', password: '' });
+    const [newOpData, setNewOpData] = useState({
+        firstName: '',
+        lastName: '',
+        email: '',
+        phone: '',
+        ratePerBoot: 10,
+        password: '',
+        status: 'active',
+        ssn: ''
+    });
     const [isAddingOp, setIsAddingOp] = useState(false);
     const [addOpError, setAddOpError] = useState('');
     const [reviewNotes, setReviewNotes] = useState('');
@@ -219,9 +229,43 @@ export default function AdminDashboard() {
         setIsAddingOp(true);
         try {
             const addOperatorFn = httpsCallable(functions, 'addOperator');
-            await addOperatorFn(newOpData);
+            const res = await addOperatorFn({
+                firstName: newOpData.firstName.trim(),
+                lastName: newOpData.lastName.trim(),
+                email: newOpData.email.trim(),
+                phone: newOpData.phone.trim(),
+                password: newOpData.password
+            });
+
+            const uid = res.data?.uid;
+            if (uid) {
+                await updateDoc(doc(db, 'users', uid), {
+                    ratePerBoot: Number(newOpData.ratePerBoot) || 10,
+                    status: newOpData.status || 'active',
+                    payoutsEnabled: true
+                });
+
+                if (newOpData.ssn && newOpData.ssn.trim()) {
+                    await setDoc(doc(db, 'operator_secure_data', uid), {
+                        ssn: newOpData.ssn.trim(),
+                        w9_submitted: true,
+                        updatedAt: new Date()
+                    });
+                }
+            }
+
             setShowAddOpModal(false);
-            setNewOpData({ firstName: '', lastName: '', phone: '', email: '', password: '' });
+            setNewOpData({
+                firstName: '',
+                lastName: '',
+                email: '',
+                phone: '',
+                ratePerBoot: 10,
+                password: '',
+                status: 'active',
+                ssn: ''
+            });
+            await fetchOperators();
             alert("Operator added successfully!");
         } catch (err) {
             console.error(err);
@@ -694,8 +738,9 @@ export default function AdminDashboard() {
                 <div className="flex justify-between items-center mb-4 flex-responsive">
                     <h3>Batch History (Paid / Processing / Rejected)</h3>
                     <div className="flex gap-4">
+                        <label className="date-filter" htmlFor="historyDateFilter">Date Filter</label>
                         <select
-                            className="form-input"
+                            className="form-input weekly"
                             style={{ padding: '0.5rem', width: 'auto', marginBottom: 0 }}
                             value={historyDateFilter}
                             onChange={e => setHistoryDateFilter(e.target.value)}
@@ -1037,42 +1082,120 @@ export default function AdminDashboard() {
             {/* Add Operator Modal */}
             {showAddOpModal && (
                 <div className="modal-overlay">
-                    <div className="modal-content glass-card" style={{ maxWidth: '450px' }}>
+                    <div className="modal-content glass-card" style={{ maxWidth: '550px' }}>
                         <button className="modal-close" onClick={() => setShowAddOpModal(false)}>X</button>
                         <h3 className="mb-4">Add Boot Operator</h3>
-                        {addOpError && <div style={{ color: 'var(--status-error)', marginBottom: '1rem' }}>{addOpError}</div>}
+                        {addOpError && (
+                            <div style={{ color: 'var(--status-error)', backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.875rem' }}>
+                                {addOpError}
+                            </div>
+                        )}
                         <form onSubmit={handleAddOperator}>
                             <div className="flex gap-4 flex-responsive">
                                 <div className="form-group" style={{ flex: 1 }}>
-                                    <label className="form-label">First Name</label>
-                                    <input type="text" className="form-input" required
-                                        value={newOpData.firstName} onChange={e => setNewOpData({ ...newOpData, firstName: e.target.value })} />
+                                    <label className="form-label">First Name *</label>
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        required
+                                        value={newOpData.firstName}
+                                        onChange={e => setNewOpData({ ...newOpData, firstName: e.target.value })}
+                                        placeholder="John"
+                                    />
                                 </div>
                                 <div className="form-group" style={{ flex: 1 }}>
-                                    <label className="form-label">Last Name</label>
-                                    <input type="text" className="form-input" required
-                                        value={newOpData.lastName} onChange={e => setNewOpData({ ...newOpData, lastName: e.target.value })} />
+                                    <label className="form-label">Last Name *</label>
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        required
+                                        value={newOpData.lastName}
+                                        onChange={e => setNewOpData({ ...newOpData, lastName: e.target.value })}
+                                        placeholder="Doe"
+                                    />
                                 </div>
                             </div>
+
                             <div className="form-group">
-                                <label className="form-label">Phone Number</label>
-                                <input type="tel" className="form-input" required
-                                    value={newOpData.phone} onChange={e => setNewOpData({ ...newOpData, phone: e.target.value })} />
+                                <label className="form-label">Email Address *</label>
+                                <input
+                                    type="email"
+                                    className="form-input"
+                                    required
+                                    value={newOpData.email}
+                                    onChange={e => setNewOpData({ ...newOpData, email: e.target.value })}
+                                    placeholder="john.doe@example.com"
+                                />
                             </div>
+
+                            <div className="flex gap-4 flex-responsive">
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label className="form-label">Phone Number *</label>
+                                    <input
+                                        type="tel"
+                                        className="form-input"
+                                        required
+                                        value={newOpData.phone}
+                                        onChange={e => setNewOpData({ ...newOpData, phone: e.target.value })}
+                                        placeholder="(512) 555-0199"
+                                    />
+                                </div>
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label className="form-label">Rate Per Boot ($) *</label>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        className="form-input"
+                                        required
+                                        value={newOpData.ratePerBoot}
+                                        onChange={e => setNewOpData({ ...newOpData, ratePerBoot: e.target.value })}
+                                        placeholder="10.00"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex gap-4 flex-responsive">
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label className="form-label">Account Password *</label>
+                                    <input
+                                        type="password"
+                                        className="form-input"
+                                        required
+                                        minLength={6}
+                                        value={newOpData.password}
+                                        onChange={e => setNewOpData({ ...newOpData, password: e.target.value })}
+                                        placeholder="Min. 6 characters"
+                                    />
+                                </div>
+                                <div className="form-group" style={{ flex: 1 }}>
+                                    <label className="form-label">Status</label>
+                                    <select
+                                        className="form-input"
+                                        value={newOpData.status}
+                                        onChange={e => setNewOpData({ ...newOpData, status: e.target.value })}
+                                    >
+                                        <option value="active">Active</option>
+                                        <option value="inactive">Inactive</option>
+                                    </select>
+                                </div>
+                            </div>
+
                             <div className="form-group">
-                                <label className="form-label">Email</label>
-                                <input type="email" className="form-input" required
-                                    value={newOpData.email} onChange={e => setNewOpData({ ...newOpData, email: e.target.value })} />
+                                <label className="form-label">SSN / Tax ID <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>(Optional for 1099)</span></label>
+                                <input
+                                    type="text"
+                                    className="form-input"
+                                    value={newOpData.ssn}
+                                    onChange={e => setNewOpData({ ...newOpData, ssn: e.target.value })}
+                                    placeholder="XXX-XX-XXXX"
+                                />
                             </div>
-                            <div className="form-group">
-                                <label className="form-label">Password</label>
-                                <input type="text" className="form-input" required minLength={6}
-                                    value={newOpData.password} onChange={e => setNewOpData({ ...newOpData, password: e.target.value })} />
-                            </div>
-                            <div className="flex justify-end gap-4 mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+
+                            <div className="flex justify-end gap-4 mt-6 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
                                 <button type="button" className="btn btn-secondary" onClick={() => setShowAddOpModal(false)}>Cancel</button>
                                 <button type="submit" className="btn btn-primary" disabled={isAddingOp}>
-                                    {isAddingOp ? 'Adding...' : 'Add Operator'}
+                                    {isAddingOp ? 'Adding...' : 'Create Operator'}
                                 </button>
                             </div>
                         </form>
