@@ -412,8 +412,8 @@ export default function BatchDetails() {
                                         <>
                                             <button 
                                                 type="button"
-                                                className="btn btn-secondary" 
-                                                style={{ padding: '0.25rem', color: 'var(--accent-primary)' }}
+                                                className="btn btn-secondary btn-icon-sm" 
+                                                style={{ color: 'var(--accent-primary)' }}
                                                 onClick={() => handleEditClick(tx)}
                                                 title="Edit Transaction"
                                             >
@@ -421,8 +421,8 @@ export default function BatchDetails() {
                                             </button>
                                             <button 
                                                 type="button"
-                                                className="btn btn-secondary" 
-                                                style={{ padding: '0.25rem', color: 'var(--status-error)' }}
+                                                className="btn btn-secondary btn-icon-sm" 
+                                                style={{ color: 'var(--status-error)' }}
                                                 onClick={() => handleDeleteTransaction(tx.id)}
                                                 title="Delete Transaction"
                                             >

@@ -769,15 +769,15 @@ export default function AdminDashboard() {
                                             <div style={{ flex: 1, minWidth: '120px', display: 'flex', justifyContent: 'center' }}>
                                                 <div className="flex gap-2" style={{ justifyContent: 'center' }}>
                                                     {(batch.status === 'paid' || batch.status === 'processing') && (
-                                                        <button className="btn btn-secondary icon-btn-mobile" style={{ padding: '0.5rem', fontSize: '0.875rem' }} disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)} title="Download PDF Stub">
+                                                        <button className="btn btn-secondary btn-icon" disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)} title="Download PDF Stub">
                                                             <Download size={18} />
                                                         </button>
                                                     )}
-                                                    <button className="btn btn-secondary icon-btn-mobile" style={{ padding: '0.5rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)} title="View Documents">
+                                                    <button className="btn btn-secondary btn-icon" onClick={() => handleViewDocs(batch)} title="View Documents">
                                                         <Images size={18} />
                                                     </button>
-                                                    <button className="btn btn-secondary icon-btn-mobile" style={{ padding: '0.5rem', fontSize: '0.875rem', color: 'var(--status-error)' }} title="Archive Batch" onClick={() => handleArchiveBatch(batch.id)}>
-                                                        <Trash2 size={16} />
+                                                    <button className="btn btn-secondary btn-icon" style={{ color: 'var(--status-error)' }} title="Archive Batch" onClick={() => handleArchiveBatch(batch.id)}>
+                                                        <Trash2 size={18} />
                                                     </button>
                                                 </div>
                                             </div>
@@ -815,16 +815,16 @@ export default function AdminDashboard() {
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>Payout Amount</div>
                                             </div>
 
-                                            <div className="flex justify-center gap-4" style={{ paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                                            <div className="flex justify-center gap-3" style={{ paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
                                                 {(batch.status === 'paid' || batch.status === 'processing') && (
-                                                    <button className="btn btn-secondary icon-btn-mobile" style={{ padding: '0.75rem' }} disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)} title="Download PDF Stub">
+                                                    <button className="btn btn-secondary btn-icon" disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)} title="Download PDF Stub">
                                                         <Download size={18} />
                                                     </button>
                                                 )}
-                                                <button className="btn btn-secondary icon-btn-mobile" style={{ padding: '0.75rem' }} onClick={() => handleViewDocs(batch)} title="View Documents">
+                                                <button className="btn btn-secondary btn-icon" onClick={() => handleViewDocs(batch)} title="View Documents">
                                                     <Images size={18} />
                                                 </button>
-                                                <button className="btn btn-secondary icon-btn-mobile" style={{ padding: '0.75rem', color: 'var(--status-error)' }} title="Archive Batch" onClick={() => handleArchiveBatch(batch.id)}>
+                                                <button className="btn btn-secondary btn-icon" style={{ color: 'var(--status-error)' }} title="Archive Batch" onClick={() => handleArchiveBatch(batch.id)}>
                                                     <Trash2 size={18} />
                                                 </button>
                                             </div>

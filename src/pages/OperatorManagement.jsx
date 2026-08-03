@@ -301,28 +301,25 @@ export default function OperatorManagement() {
                 <div data-label="Actions" style={{ flex: 1, minWidth: '80px' }}>
                     <div className="flex gap-2">
                         <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '0.5rem' }} 
+                            className="btn btn-secondary btn-icon" 
                             onClick={() => handleToggleStatus(op)}
                             title={op.status === 'inactive' ? 'Reactivate Operator' : 'Deactivate Operator'}
                         >
-                            {op.status === 'inactive' ? <UserCheck size={16} /> : <UserX size={16} />}
+                            {op.status === 'inactive' ? <UserCheck size={18} /> : <UserX size={18} />}
                         </button>
                         <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '0.5rem' }} 
+                            className="btn btn-secondary btn-icon" 
                             onClick={() => handleOpenEdit(op)}
                             title="Edit Operator"
                         >
-                            <Edit2 size={16} />
+                            <Edit2 size={18} />
                         </button>
                         <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '0.5rem' }} 
+                            className="btn btn-secondary btn-icon" 
                             onClick={() => handleOpenHistory(op)}
                             title="View History"
                         >
-                            <History size={16} />
+                            <History size={18} />
                         </button>
                     </div>
                 </div>

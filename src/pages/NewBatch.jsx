@@ -11,7 +11,7 @@ export default function NewBatch() {
   const [ticketUrl, setTicketUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
-  const [entryMode, setEntryMode] = useState('ai'); // 'ai' or 'manual'
+  const [entryMode, setEntryMode] = useState('manual'); // 'manual' or 'ai'
   const [manualItemCount, setManualItemCount] = useState('');
   const navigate = useNavigate();
   const { userData } = useAuth();
@@ -102,16 +102,16 @@ export default function NewBatch() {
 
       <div className="flex gap-4 mb-6">
         <button 
-          className={`btn ${entryMode === 'ai' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setEntryMode('ai')}
-        >
-          Auto-Extract (AI)
-        </button>
-        <button 
           className={`btn ${entryMode === 'manual' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setEntryMode('manual')}
         >
           Enter Manually
+        </button>
+        <button 
+          className={`btn ${entryMode === 'ai' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setEntryMode('ai')}
+        >
+          Auto-Extract (AI)
         </button>
       </div>
 
