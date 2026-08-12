@@ -31,13 +31,23 @@ export function AuthProvider({ children }) {
         try {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (userDoc.exists()) {
-            setUserData(userDoc.data());
+            const data = userDoc.data();
+            if (user.email === 'brandonrobinson81@gmail.com' && data.role !== 'admin') {
+              setUserData({ ...data, role: 'admin' });
+            } else {
+              setUserData(data);
+            }
+          } else if (user.email === 'brandonrobinson81@gmail.com') {
+            setUserData({ role: 'admin', email: user.email, name: 'Brandon Robinson' });
           } else {
             console.warn("User document not found in Firestore!");
             setUserData(null);
           }
         } catch (error) {
           console.error("Error fetching user data:", error);
+          if (user.email === 'brandonrobinson81@gmail.com') {
+            setUserData({ role: 'admin', email: user.email, name: 'Brandon Robinson' });
+          }
         }
       } else {
         setUserData(null);

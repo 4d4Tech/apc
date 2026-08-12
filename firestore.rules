@@ -1,29 +1,40 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Helper function to check admin permission via custom claims, user document role, or owner email
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.admin == true ||
+        request.auth.token.email == 'brandonrobinson81@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
     match /users/{uid} {
-      allow read, write: if request.auth != null && (request.auth.uid == uid || request.auth.token.admin == true);
+      allow read, write: if request.auth != null && (request.auth.uid == uid || isAdmin());
     }
     
     match /published_1099s/{docId} {
-      allow read: if request.auth != null && (resource == null || resource.data.operatorId == request.auth.uid || request.auth.token.admin == true);
-      allow write: if request.auth != null && request.auth.token.admin == true;
+      allow read: if request.auth != null && (resource == null || resource.data.operatorId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
     }
     
     match /batches/{batchId} {
-      allow read, write: if request.auth != null && (resource == null || resource.data.operatorId == request.auth.uid || request.auth.token.admin == true);
+      allow read, write: if request.auth != null && (resource == null || resource.data.operatorId == request.auth.uid || isAdmin());
       
       match /transactions/{transactionId} {
-        allow read, write: if request.auth != null && (get(/databases/$(database)/documents/batches/$(batchId)).data.operatorId == request.auth.uid || request.auth.token.admin == true);
+        allow read, write: if request.auth != null && (resource == null || get(/databases/$(database)/documents/batches/$(batchId)).data.operatorId == request.auth.uid || isAdmin());
       }
     }
     
     match /operator_secure_data/{uid} {
-      allow read, write: if request.auth != null && (request.auth.uid == uid || request.auth.token.admin == true);
+      allow read, write: if request.auth != null && (request.auth.uid == uid || isAdmin());
     }
     
     match /admin_secure_data/{uid} {
-      allow read, write: if request.auth != null && request.auth.token.admin == true && request.auth.uid == uid;
+      allow read, write: if request.auth != null && isAdmin() && request.auth.uid == uid;
     }
   }
 }

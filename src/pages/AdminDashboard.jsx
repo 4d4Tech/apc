@@ -7,6 +7,8 @@ import { signOut } from 'firebase/auth';
 import { generatePaystubPDF, generate1099PDF } from '../utils/pdfGenerator';
 import { PaystubPreviewModal } from '../components/PaystubPreviewModal';
 import { MessageSquare, Archive, FileText, Eye, Users, Download, Images, User, Calendar, Trash2, Send, Settings } from 'lucide-react';
+import { PiiInput } from '../components/PiiInput';
+import { encryptPii, decryptPii, maskPii, extractLast4, isValidSsnOrEin } from '../utils/piiCrypto';
 import './AdminDashboard.css';
 
 const getSafeDate = (d) => {
@@ -66,11 +68,7 @@ export default function AdminDashboard() {
     const [isDownloadingPaystub, setIsDownloadingPaystub] = useState(false);
     const [paystubPdfData, setPaystubPdfData] = useState(null);
 
-    // New UI states
-    const [selectedVerifiedBatches, setSelectedVerifiedBatches] = useState([]);
-    const [historySearchTerm, setHistorySearchTerm] = useState('');
-    const [historyDateFilter, setHistoryDateFilter] = useState('all');
-
+    // Settings / Payer Profile State
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [isSavingProfile, setIsSavingProfile] = useState(false);
     const [profileData, setProfileData] = useState({
@@ -83,6 +81,15 @@ export default function AdminDashboard() {
         tin: ''
     });
     const [payerInfo, setPayerInfo] = useState(null);
+
+    // Run Payroll State
+    const [selectedVerifiedBatches, setSelectedVerifiedBatches] = useState([]);
+
+    // History Filters State
+    const [historySearchTerm, setHistorySearchTerm] = useState('');
+    const [historyDateFilter, setHistoryDateFilter] = useState('all');
+    const [historyOperatorFilter, setHistoryOperatorFilter] = useState('');
+    const [historyStatusFilter, setHistoryStatusFilter] = useState('');
 
     const navigate = useNavigate();
 
@@ -100,6 +107,11 @@ export default function AdminDashboard() {
             const ud = userDoc.exists() ? userDoc.data() : {};
             const sd = secureDoc.exists() ? secureDoc.data() : {};
 
+            let decryptedTin = '';
+            if (sd.tin) {
+                decryptedTin = await decryptPii(sd.tin);
+            }
+
             setProfileData({
                 companyName: ud.companyName || '',
                 streetAddress: ud.streetAddress || '',
@@ -107,7 +119,7 @@ export default function AdminDashboard() {
                 state: ud.state || '',
                 zip: ud.zip || '',
                 phone: ud.phone || '',
-                tin: sd.tin || ''
+                tin: decryptedTin || sd.maskedTin || ''
             });
         } catch (err) {
             console.error("Error fetching admin profile data:", err);
@@ -121,7 +133,14 @@ export default function AdminDashboard() {
             const opsMap = {};
             snap.docs.forEach(d => {
                 const data = d.data();
-                opsMap[d.id] = `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Unknown Operator';
+                const fullName = (data.firstName || data.lastName) 
+                    ? `${data.firstName || ''} ${data.lastName || ''}`.trim() 
+                    : (data.name || 'Unknown Operator');
+                opsMap[d.id] = {
+                    id: d.id,
+                    name: fullName,
+                    status: data.status || 'active'
+                };
             });
             setOperators(opsMap);
         } catch (err) {
@@ -144,7 +163,8 @@ export default function AdminDashboard() {
     };
 
     const formatOperatorName = (operatorId) => {
-        const name = operators[operatorId];
+        const op = operators[operatorId];
+        const name = typeof op === 'object' ? op?.name : op;
         if (name && name !== 'Unknown Operator' && name.trim().length > 0) return name;
         return `Operator (${operatorId.slice(0, 8)}...)`;
     };
@@ -246,8 +266,20 @@ export default function AdminDashboard() {
                 });
 
                 if (newOpData.ssn && newOpData.ssn.trim()) {
+                    const rawSsn = newOpData.ssn.trim();
+                    if (!isValidSsnOrEin(rawSsn)) {
+                        setAddOpError("Invalid 9-digit SSN or Tax ID format.");
+                        setIsAddingOp(false);
+                        return;
+                    }
+                    const encryptedSsn = await encryptPii(rawSsn);
+                    const maskedSsn = maskPii(rawSsn);
+                    const ssnLast4 = extractLast4(rawSsn);
+
                     await setDoc(doc(db, 'operator_secure_data', uid), {
-                        ssn: newOpData.ssn.trim(),
+                        ssn: encryptedSsn,
+                        maskedSsn,
+                        ssnLast4,
                         w9_submitted: true,
                         updatedAt: new Date()
                     });
@@ -442,6 +474,12 @@ export default function AdminDashboard() {
     const handleSaveProfile = async (e) => {
         e.preventDefault();
         if (!auth.currentUser) return;
+
+        if (profileData.tin && !isValidSsnOrEin(profileData.tin)) {
+            alert("Please provide a valid 9-digit TIN or EIN (e.g. XX-XXXXXXX).");
+            return;
+        }
+
         setIsSavingProfile(true);
         try {
             await updateDoc(doc(db, 'users', auth.currentUser.uid), {
@@ -452,9 +490,18 @@ export default function AdminDashboard() {
                 zip: profileData.zip,
                 phone: profileData.phone
             });
-            await setDoc(doc(db, 'admin_secure_data', auth.currentUser.uid), {
-                tin: profileData.tin
-            }, { merge: true });
+
+            if (profileData.tin) {
+                const encryptedTin = await encryptPii(profileData.tin);
+                const maskedTin = maskPii(profileData.tin);
+
+                await setDoc(doc(db, 'admin_secure_data', auth.currentUser.uid), {
+                    tin: encryptedTin,
+                    maskedTin,
+                    updatedAt: new Date()
+                }, { merge: true });
+            }
+
             setShowSettingsModal(false);
             alert("Profile updated successfully.");
         } catch (err) {
@@ -528,7 +575,9 @@ export default function AdminDashboard() {
     };
 
     const pendingPayoutTotal = batches.filter(b => b.status === 'verified').reduce((sum, b) => sum + getNetPay(b), 0);
-    const activeOpsCount = Object.keys(operators).length;
+    const totalOpsList = Object.values(operators);
+    const activeOpsCount = totalOpsList.filter(op => (typeof op === 'object' ? op.status !== 'inactive' : true)).length;
+    const inactiveOpsCount = totalOpsList.filter(op => typeof op === 'object' && op.status === 'inactive').length;
     const pendingCount = batches.filter(b => b.status === 'pending').length;
 
     return (
@@ -584,7 +633,14 @@ export default function AdminDashboard() {
                         </div>
                     </div>
                     <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Active Operators</div>
-                    <div style={{ fontSize: '1.875rem', fontWeight: 700, color: 'var(--text-primary)' }}>{activeOpsCount}</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '1.875rem', fontWeight: 700, color: 'var(--text-primary)' }}>{activeOpsCount}</span>
+                        {inactiveOpsCount > 0 && (
+                            <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                                ({inactiveOpsCount} inactive)
+                            </span>
+                        )}
+                    </div>
                 </div>
 
                 {/* Pending Verification */}
@@ -1056,19 +1112,15 @@ export default function AdminDashboard() {
                                         required
                                     />
                                 </div>
-                                <div className="form-group" style={{ flex: 1 }}>
-                                    <label>TIN or EIN</label>
-                                    <input
-                                        type="text"
+                                <div style={{ flex: 1 }}>
+                                    <PiiInput
+                                        label="TIN or EIN"
                                         value={profileData.tin}
-                                        onChange={(e) => setProfileData({ ...profileData, tin: e.target.value })}
-                                        className="form-input"
+                                        onChange={(val) => setProfileData({ ...profileData, tin: val })}
                                         placeholder="XX-XXXXXXX"
                                         required
+                                        helperText="Stored securely with field-level encryption. Used for payer identification."
                                     />
-                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                                        Stored securely. Used for payer identification.
-                                    </div>
                                 </div>
                             </div>
                             <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem' }} disabled={isSavingProfile}>
@@ -1181,16 +1233,13 @@ export default function AdminDashboard() {
                                 </div>
                             </div>
 
-                            <div className="form-group">
-                                <label className="form-label">SSN / Tax ID <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>(Optional for 1099)</span></label>
-                                <input
-                                    type="text"
-                                    className="form-input"
-                                    value={newOpData.ssn}
-                                    onChange={e => setNewOpData({ ...newOpData, ssn: e.target.value })}
-                                    placeholder="XXX-XX-XXXX"
-                                />
-                            </div>
+                            <PiiInput
+                                label="SSN / Tax ID"
+                                value={newOpData.ssn}
+                                onChange={(val) => setNewOpData({ ...newOpData, ssn: val })}
+                                placeholder="XXX-XX-XXXX"
+                                helperText="Optional for 1099. Stored with field-level encryption."
+                            />
 
                             <div className="flex justify-end gap-4 mt-6 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
                                 <button type="button" className="btn btn-secondary" onClick={() => setShowAddOpModal(false)}>Cancel</button>

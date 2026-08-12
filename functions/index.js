@@ -5,6 +5,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Stripe = require('stripe');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_mock_key');
 const { onRequest } = require("firebase-functions/v2/https");
+const { decryptPii, extractLast4, formatSsnOrEin, maskPii } = require('./piiCrypto');
 
 initializeApp();
 
@@ -220,7 +221,13 @@ exports.generatepaystub = onCall(async (request) => {
         const operatorData = operatorDoc.exists ? operatorDoc.data() : {};
 
         const secureDoc = await getFirestore().collection('operator_secure_data').doc(operatorId).get();
-        const ssn = secureDoc.exists ? secureDoc.data().ssn : null;
+        const sd = secureDoc.exists ? secureDoc.data() : {};
+        let ssnLast4 = sd.ssnLast4;
+        if (!ssnLast4 && sd.ssn) {
+            const decrypted = await decryptPii(sd.ssn);
+            ssnLast4 = extractLast4(decrypted);
+        }
+        const ssnDisplay = ssnLast4 ? `xxx-xx-${ssnLast4}` : 'xxx-xx-xxxx';
 
         // Calculate YTD (same logic as 1099, but for the year of the batch)
         const batchDate = batchData.date ? batchData.date.toDate() : new Date();
@@ -315,7 +322,7 @@ exports.generatepaystub = onCall(async (request) => {
                     name: operatorData.name || 'Unknown',
                     phone: operatorData.phone || 'N/A',
                     email: operatorData.email || 'N/A',
-                    ssnLast4: ssn ? `xxx-xx-${ssn.slice(-4)}` : 'xxx-xx-xxxx'
+                    ssnLast4: ssnDisplay
                 },
                 payPeriod: {
                     startDate: dailyStats[0]?.date || batchDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' }),
@@ -392,7 +399,12 @@ exports.generate1099 = onCall(async (request) => {
 
             if (ytdTotal >= 600) {
                 const secureDoc = await getFirestore().collection('operator_secure_data').doc(operatorId).get();
-                const ssn = secureDoc.exists ? secureDoc.data().ssn : null;
+                const sd = secureDoc.exists ? secureDoc.data() : {};
+                let decryptedSsn = '';
+                if (sd.ssn) {
+                    decryptedSsn = await decryptPii(sd.ssn);
+                }
+                const formattedSsn = formatSsnOrEin(decryptedSsn || sd.maskedSsn || '');
 
                 const opData = opDoc.data();
                 const fullName = (opData.firstName || opData.lastName) 
@@ -407,7 +419,7 @@ exports.generate1099 = onCall(async (request) => {
                     city: opDoc.data().city || '',
                     state: opDoc.data().state || '',
                     zip: opDoc.data().zip || '',
-                    ssnOrEin: ssn || '',
+                    ssnOrEin: formattedSsn || '',
                     ytdTotal
                 });
             }
@@ -415,6 +427,13 @@ exports.generate1099 = onCall(async (request) => {
 
         const adminDoc = await getFirestore().collection('users').doc(request.auth.uid).get();
         const adminSecureDoc = await getFirestore().collection('admin_secure_data').doc(request.auth.uid).get();
+        const adminSd = adminSecureDoc.exists ? adminSecureDoc.data() : {};
+        let decryptedTin = '';
+        if (adminSd.tin) {
+            decryptedTin = await decryptPii(adminSd.tin);
+        }
+        const formattedTin = formatSsnOrEin(decryptedTin || adminSd.maskedTin || 'XX-XXXXXXX');
+
         const payerInfo = {
             companyName: adminDoc.data()?.companyName || adminDoc.data()?.name || '',
             streetAddress: adminDoc.data()?.streetAddress || '',
@@ -422,7 +441,7 @@ exports.generate1099 = onCall(async (request) => {
             state: adminDoc.data()?.state || '',
             zip: adminDoc.data()?.zip || '',
             phone: adminDoc.data()?.phone || '',
-            tin: adminSecureDoc.exists ? adminSecureDoc.data().tin : 'XX-XXXXXXX'
+            tin: formattedTin || 'XX-XXXXXXX'
         };
 
         return { success: true, year, generatedCount: results.length, data: results, payerInfo };

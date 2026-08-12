@@ -5,6 +5,8 @@ import { collection, getDocs, doc, updateDoc, setDoc, serverTimestamp, query, wh
 import { db, firebaseConfig } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Edit2, History, UserX, UserCheck, UserPlus, Plus, X } from 'lucide-react';
+import { PiiInput } from '../components/PiiInput';
+import { encryptPii, maskPii, extractLast4, isValidSsnOrEin } from '../utils/piiCrypto';
 
 export default function OperatorManagement() {
   const [operators, setOperators] = useState([]);
@@ -92,6 +94,12 @@ export default function OperatorManagement() {
   const handleCreateEmployee = async (e) => {
     e.preventDefault();
     setAddError('');
+
+    if (addFormData.ssn.trim() && !isValidSsnOrEin(addFormData.ssn.trim())) {
+      setAddError('Please enter a valid 9-digit SSN or Tax ID (e.g. XXX-XX-XXXX).');
+      return;
+    }
+
     setIsSubmittingAdd(true);
 
     let secondaryApp = null;
@@ -123,10 +131,17 @@ export default function OperatorManagement() {
         createdAt: serverTimestamp()
       });
 
-      // 4. Optionally write to operator_secure_data if SSN provided
+      // 4. Optionally write encrypted PII to operator_secure_data if SSN provided
       if (addFormData.ssn.trim()) {
+        const rawSsn = addFormData.ssn.trim();
+        const encryptedSsn = await encryptPii(rawSsn);
+        const maskedSsn = maskPii(rawSsn);
+        const ssnLast4 = extractLast4(rawSsn);
+
         await setDoc(doc(db, 'operator_secure_data', newUser.uid), {
-          ssn: addFormData.ssn.trim(),
+          ssn: encryptedSsn,
+          maskedSsn,
+          ssnLast4,
           w9_submitted: true,
           updatedAt: new Date()
         });
@@ -595,16 +610,13 @@ export default function OperatorManagement() {
                           </div>
                       </div>
 
-                      <div className="form-group">
-                          <label className="form-label">SSN / Tax ID <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>(Optional for 1099)</span></label>
-                          <input 
-                              type="text" 
-                              className="form-input" 
-                              value={addFormData.ssn} 
-                              onChange={e => setAddFormData({...addFormData, ssn: e.target.value})} 
-                              placeholder="XXX-XX-XXXX"
-                          />
-                      </div>
+                      <PiiInput
+                          label="SSN / Tax ID"
+                          value={addFormData.ssn}
+                          onChange={(val) => setAddFormData({...addFormData, ssn: val})}
+                          placeholder="XXX-XX-XXXX"
+                          helperText="Optional for 1099. Stored with field-level encryption."
+                      />
 
                       <div className="flex justify-end gap-4 mt-6 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
                           <button type="button" className="btn btn-secondary" onClick={handleCloseAddModal} disabled={isSubmittingAdd}>Cancel</button>

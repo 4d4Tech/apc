@@ -7,6 +7,8 @@ import { signOut } from 'firebase/auth';
 import { MessageSquare, FileText, CheckCircle, AlertCircle, Clock, Download, Bell, Settings } from 'lucide-react';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { generate1099PDF } from '../utils/pdfGenerator';
+import { PiiInput } from '../components/PiiInput';
+import { encryptPii, decryptPii, maskPii, extractLast4, isValidSsnOrEin } from '../utils/piiCrypto';
 
 export default function OperatorDashboard() {
   const { userData } = useAuth();
@@ -78,12 +80,17 @@ export default function OperatorDashboard() {
         const ud = userDoc.exists() ? userDoc.data() : {};
         const sd = secureDoc.exists() ? secureDoc.data() : {};
         
+        let decryptedSsn = '';
+        if (sd.ssn) {
+          decryptedSsn = await decryptPii(sd.ssn);
+        }
+        
         setProfileData({
           streetAddress: ud.streetAddress || '',
           city: ud.city || '',
           state: ud.state || '',
           zip: ud.zip || '',
-          ssnOrEin: sd.ssn || ''
+          ssnOrEin: decryptedSsn || sd.maskedSsn || ''
         });
       } catch (err) {
         console.error("Error fetching profile data:", err);
@@ -133,6 +140,12 @@ export default function OperatorDashboard() {
   const handleSaveProfile = async (e) => {
     e.preventDefault();
     if (!auth.currentUser) return;
+
+    if (profileData.ssnOrEin && !isValidSsnOrEin(profileData.ssnOrEin)) {
+      alert("Please provide a valid 9-digit SSN or EIN (e.g. XXX-XX-XXXX).");
+      return;
+    }
+
     setIsSavingProfile(true);
     try {
       await updateDoc(doc(db, 'users', auth.currentUser.uid), {
@@ -141,9 +154,20 @@ export default function OperatorDashboard() {
         state: profileData.state,
         zip: profileData.zip
       });
-      await setDoc(doc(db, 'operator_secure_data', auth.currentUser.uid), {
-        ssn: profileData.ssnOrEin
-      }, { merge: true });
+
+      if (profileData.ssnOrEin) {
+        const encryptedSsn = await encryptPii(profileData.ssnOrEin);
+        const maskedSsn = maskPii(profileData.ssnOrEin);
+        const ssnLast4 = extractLast4(profileData.ssnOrEin);
+
+        await setDoc(doc(db, 'operator_secure_data', auth.currentUser.uid), {
+          ssn: encryptedSsn,
+          maskedSsn,
+          ssnLast4,
+          updatedAt: new Date()
+        }, { merge: true });
+      }
+
       setShowSettingsModal(false);
       alert("Profile updated successfully.");
     } catch (err) {
@@ -381,20 +405,14 @@ export default function OperatorDashboard() {
                   />
                 </div>
               </div>
-              <div className="form-group">
-                <label>SSN or EIN</label>
-                <input 
-                  type="text" 
-                  value={profileData.ssnOrEin}
-                  onChange={(e) => setProfileData({...profileData, ssnOrEin: e.target.value})}
-                  className="form-input"
-                  placeholder="XXX-XX-XXXX"
-                  required
-                />
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                  Stored securely. Required for tax reporting.
-                </div>
-              </div>
+              <PiiInput
+                label="SSN or EIN"
+                value={profileData.ssnOrEin}
+                onChange={(val) => setProfileData({...profileData, ssnOrEin: val})}
+                placeholder="XXX-XX-XXXX"
+                required
+                helperText="Stored securely with field-level encryption. Required for tax reporting."
+              />
               <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem' }} disabled={isSavingProfile}>
                 {isSavingProfile ? 'Saving...' : 'Save Profile'}
               </button>

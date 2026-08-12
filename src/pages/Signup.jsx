@@ -3,6 +3,8 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { useNavigate, Link } from 'react-router-dom';
+import { PiiInput } from '../components/PiiInput';
+import { encryptPii, maskPii, extractLast4, isValidSsnOrEin } from '../utils/piiCrypto';
 
 export default function Signup() {
   const [firstName, setFirstName] = useState('');
@@ -18,6 +20,12 @@ export default function Signup() {
   const handleSignup = async (e) => {
     e.preventDefault();
     setError('');
+
+    if (!isValidSsnOrEin(ssn)) {
+      setError('Please provide a valid 9-digit Social Security Number or EIN.');
+      return;
+    }
+
     setIsLoading(true);
     
     try {
@@ -37,9 +45,15 @@ export default function Signup() {
         ratePerBoot: 10 // Default rate, admin can change this later
       });
 
-      // 3. Store secure data
+      // 3. Store secure encrypted data
+      const encryptedSsn = await encryptPii(ssn);
+      const maskedSsn = maskPii(ssn);
+      const ssnLast4 = extractLast4(ssn);
+
       await setDoc(doc(db, 'operator_secure_data', user.uid), {
-        ssn,
+        ssn: encryptedSsn,
+        maskedSsn,
+        ssnLast4,
         w9_submitted: true,
         updatedAt: new Date()
       });
@@ -95,17 +109,13 @@ export default function Signup() {
             />
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Social Security Number / EIN</label>
-            <input 
-              type="text" 
-              className="form-input" 
-              value={ssn} 
-              onChange={e => setSsn(e.target.value)} 
-              required 
-              placeholder="XXX-XX-XXXX"
-            />
-          </div>
+          <PiiInput
+            label="Social Security Number / EIN"
+            value={ssn}
+            onChange={setSsn}
+            required
+            placeholder="XXX-XX-XXXX"
+          />
 
           <div className="form-group">
             <label className="form-label">Email</label>
@@ -143,3 +153,4 @@ export default function Signup() {
     </div>
   );
 }
+
