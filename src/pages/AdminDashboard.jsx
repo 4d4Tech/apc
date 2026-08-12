@@ -6,16 +6,54 @@ import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { generatePaystubPDF, generate1099PDF } from '../utils/pdfGenerator';
 import { PaystubPreviewModal } from '../components/PaystubPreviewModal';
-import { MessageSquare, Archive, FileText, Eye, Users, Download, Images, User, Calendar, Trash2, Send, Settings } from 'lucide-react';
+import { MessageSquare, Archive, FileText, Eye, Users, Download, Images, User, Calendar, Trash2, Send, Settings, Plus, DollarSign, ChevronLeft, ChevronRight, Search, Filter, X, Check, SlidersHorizontal } from 'lucide-react';
 import { PiiInput } from '../components/PiiInput';
 import { encryptPii, decryptPii, maskPii, extractLast4, isValidSsnOrEin } from '../utils/piiCrypto';
 import './AdminDashboard.css';
 
 const getSafeDate = (d) => {
     if (!d) return null;
-    if (typeof d.toDate === 'function') return d.toDate();
-    if (d.seconds) return new Date(d.seconds * 1000);
-    return new Date(d);
+    try {
+        if (d instanceof Date) return isNaN(d.getTime()) ? null : d;
+        if (typeof d.toDate === 'function') {
+            const dt = d.toDate();
+            return isNaN(dt.getTime()) ? null : dt;
+        }
+        if (typeof d === 'object' && typeof d.seconds === 'number') {
+            return new Date(d.seconds * 1000);
+        }
+        if (typeof d === 'number') {
+            return new Date(d);
+        }
+        if (typeof d === 'string') {
+            const parsed = new Date(d);
+            return isNaN(parsed.getTime()) ? null : parsed;
+        }
+    } catch (e) {
+        return null;
+    }
+    return null;
+};
+
+const getBatchDateObj = (batch) => {
+    if (!batch) return null;
+    return getSafeDate(batch.paidAt) ||
+           getSafeDate(batch.date) ||
+           getSafeDate(batch.createdAt) ||
+           getSafeDate(batch.timestamp) ||
+           getSafeDate(batch.updatedAt);
+};
+
+const formatBatchDate = (batch) => {
+    const dt = getBatchDateObj(batch);
+    if (!dt) return 'N/A';
+    return dt.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
 };
 
 const getNetPay = (batch) => {
@@ -85,11 +123,13 @@ export default function AdminDashboard() {
     // Run Payroll State
     const [selectedVerifiedBatches, setSelectedVerifiedBatches] = useState([]);
 
-    // History Filters State
+    // History Filters & Pagination State
     const [historySearchTerm, setHistorySearchTerm] = useState('');
     const [historyDateFilter, setHistoryDateFilter] = useState('all');
     const [historyOperatorFilter, setHistoryOperatorFilter] = useState('');
     const [historyStatusFilter, setHistoryStatusFilter] = useState('');
+    const [historyItemsPerPage, setHistoryItemsPerPage] = useState(10);
+    const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
 
     const navigate = useNavigate();
 
@@ -530,6 +570,10 @@ export default function AdminDashboard() {
     const getFilteredHistory = () => {
         let filtered = batches.filter(b => b.status === 'paid' || b.status === 'processing' || b.status === 'rejected');
 
+        if (historyStatusFilter && historyStatusFilter !== 'all') {
+            filtered = filtered.filter(b => b.status === historyStatusFilter);
+        }
+
         if (historySearchTerm) {
             const lowerSearch = historySearchTerm.toLowerCase();
             filtered = filtered.filter(b => {
@@ -538,15 +582,18 @@ export default function AdminDashboard() {
             });
         }
 
-        if (historyDateFilter !== 'all') {
-            filtered = filtered.filter(b => {
-                const sortDateStr = b.paidAt || b.date;
-                if (!sortDateStr) return false;
-                const batchDate = getSafeDate(sortDateStr);
-                if (!batchDate) return false;
-                const now = new Date();
+        if (historyDateFilter && historyDateFilter !== 'all') {
+            const now = new Date();
 
-                if (historyDateFilter === 'thisWeek') {
+            filtered = filtered.filter(b => {
+                const batchDate = getBatchDateObj(b);
+                if (!batchDate) return false;
+
+                if (historyDateFilter === 'today') {
+                    const startOfToday = new Date(now);
+                    startOfToday.setHours(0, 0, 0, 0);
+                    return batchDate >= startOfToday;
+                } else if (historyDateFilter === 'thisWeek') {
                     const startOfWeek = new Date(now);
                     startOfWeek.setDate(now.getDate() - now.getDay());
                     startOfWeek.setHours(0, 0, 0, 0);
@@ -559,16 +606,23 @@ export default function AdminDashboard() {
                     startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
                     return batchDate >= startOfLastWeek && batchDate < startOfThisWeek;
                 } else if (historyDateFilter === 'thisMonth') {
-                    return batchDate.getMonth() === now.getMonth() && batchDate.getFullYear() === now.getFullYear();
+                    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                    return batchDate >= startOfMonth;
+                } else if (historyDateFilter === 'lastMonth') {
+                    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                    return batchDate >= startOfLastMonth && batchDate < startOfThisMonth;
                 }
                 return true;
             });
         }
 
         filtered.sort((a, b) => {
-            const dateA = a.date ? getSafeDate(a.date).getTime() : 0;
-            const dateB = b.date ? getSafeDate(b.date).getTime() : 0;
-            return dateB - dateA;
+            const dtA = getBatchDateObj(a);
+            const dtB = getBatchDateObj(b);
+            const timeA = dtA ? dtA.getTime() : 0;
+            const timeB = dtB ? dtB.getTime() : 0;
+            return timeB - timeA;
         });
 
         return filtered;
@@ -579,6 +633,15 @@ export default function AdminDashboard() {
     const activeOpsCount = totalOpsList.filter(op => (typeof op === 'object' ? op.status !== 'inactive' : true)).length;
     const inactiveOpsCount = totalOpsList.filter(op => typeof op === 'object' && op.status === 'inactive').length;
     const pendingCount = batches.filter(b => b.status === 'pending').length;
+
+    // Pagination calculations for Batch History
+    const allFilteredHistory = getFilteredHistory();
+    const totalHistoryCount = allFilteredHistory.length;
+    const totalHistoryPages = Math.ceil(totalHistoryCount / historyItemsPerPage) || 1;
+    const validHistoryCurrentPage = Math.min(Math.max(1, historyCurrentPage), totalHistoryPages);
+    const historyStartIndex = (validHistoryCurrentPage - 1) * historyItemsPerPage;
+    const historyEndIndex = Math.min(historyStartIndex + historyItemsPerPage, totalHistoryCount);
+    const paginatedHistory = allFilteredHistory.slice(historyStartIndex, historyEndIndex);
 
     return (
         <div>
@@ -790,36 +853,251 @@ export default function AdminDashboard() {
                 )}
             </div>
 
-            <div className="glass-card mt-8">
-                <div className="flex justify-between items-center mb-4 flex-responsive">
-                    <h3>Batch History (Paid / Processing / Rejected)</h3>
-                    <div className="flex gap-4">
-                        <label className="date-filter" htmlFor="historyDateFilter">Date Filter</label>
-                        <select
-                            className="form-input weekly"
-                            style={{ padding: '0.5rem', width: 'auto', marginBottom: 0 }}
-                            value={historyDateFilter}
-                            onChange={e => setHistoryDateFilter(e.target.value)}
-                        >
-                            <option value="all">All Time</option>
-                            <option value="thisWeek">This Week</option>
-                            <option value="lastWeek">Last Week</option>
-                            <option value="thisMonth">This Month</option>
-                        </select>
-                        <input
-                            type="text"
-                            className="form-input"
-                            style={{ padding: '0.5rem', width: '250px', marginBottom: 0 }}
-                            placeholder="Search Operator Name..."
-                            value={historySearchTerm}
-                            onChange={e => setHistorySearchTerm(e.target.value)}
-                        />
+            <div className="glass-card mt-8" style={{ padding: '1.75rem', borderRadius: 'var(--md-sys-shape-corner-extra-large)' }}>
+                {/* M3 Section Title & Status Bar */}
+                <div className="flex justify-between items-center mb-6 flex-responsive gap-4">
+                    <div>
+                        <div className="flex items-center gap-2 mb-1">
+                            <SlidersHorizontal size={20} style={{ color: 'var(--md-sys-color-primary)' }} />
+                            <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Batch History</h3>
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.84375rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                            Filter paid, processing, and rejected batches by status, timeframe, or operator name.
+                        </p>
                     </div>
+                    <div className="flex items-center gap-3">
+                        <span className="badge" style={{
+                            backgroundColor: 'var(--md-sys-color-primary-container)',
+                            color: 'var(--md-sys-color-on-primary-container)',
+                            fontSize: '0.75rem',
+                            padding: '0.25rem 0.75rem'
+                        }}>
+                            {totalHistoryCount} record{totalHistoryCount !== 1 ? 's' : ''} found
+                        </span>
+                    </div>
+                </div>
+
+                {/* M3 Search Bar & Filter Controls Container */}
+                <div style={{
+                    backgroundColor: 'var(--md-sys-color-surface-variant)',
+                    borderRadius: 'var(--md-sys-shape-corner-medium)',
+                    padding: '1.25rem',
+                    marginBottom: '1.5rem',
+                    border: '1px solid var(--md-sys-color-outline-variant)'
+                }}>
+                    {/* Row 1: M3 Search Field & Rows Per Page Dropdown */}
+                    <div className="flex gap-4 items-center mb-4 flex-wrap">
+                        {/* M3 Search Field with leading Search Icon */}
+                        <div style={{ flex: '1 1 300px', position: 'relative', display: 'flex', alignItems: 'center' }}>
+                            <Search
+                                size={20}
+                                style={{
+                                    position: 'absolute',
+                                    left: '1rem',
+                                    color: 'var(--md-sys-color-on-surface-variant)',
+                                    pointerEvents: 'none'
+                                }}
+                            />
+                            <input
+                                type="text"
+                                className="form-input"
+                                placeholder="Search operator name or ID..."
+                                value={historySearchTerm}
+                                onChange={e => {
+                                    setHistorySearchTerm(e.target.value);
+                                    setHistoryCurrentPage(1);
+                                }}
+                                style={{
+                                    height: '44px',
+                                    paddingLeft: '2.75rem',
+                                    paddingRight: historySearchTerm ? '2.5rem' : '1rem',
+                                    backgroundColor: 'var(--md-sys-color-surface)',
+                                    borderRadius: 'var(--md-sys-shape-corner-large)',
+                                    border: '1px solid var(--md-sys-color-outline)',
+                                    fontSize: '0.9375rem'
+                                }}
+                            />
+                            {historySearchTerm && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setHistorySearchTerm('');
+                                        setHistoryCurrentPage(1);
+                                    }}
+                                    style={{
+                                        position: 'absolute',
+                                        right: '0.75rem',
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--md-sys-color-on-surface-variant)',
+                                        cursor: 'pointer',
+                                        padding: '0.25rem',
+                                        display: 'flex',
+                                        alignItems: 'center'
+                                    }}
+                                    title="Clear search"
+                                >
+                                    <X size={16} />
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Rows Per Page */}
+                        <div className="flex items-center gap-2" style={{ flex: '0 0 auto' }}>
+                            <label style={{ fontSize: '0.84375rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                                Rows:
+                            </label>
+                            <select
+                                className="form-input"
+                                value={historyItemsPerPage}
+                                onChange={e => {
+                                    setHistoryItemsPerPage(Number(e.target.value));
+                                    setHistoryCurrentPage(1);
+                                }}
+                                style={{
+                                    height: '44px',
+                                    padding: '0 2rem 0 1rem',
+                                    backgroundColor: 'var(--md-sys-color-surface)',
+                                    borderRadius: 'var(--md-sys-shape-corner-medium)',
+                                    border: '1px solid var(--md-sys-color-outline)',
+                                    fontWeight: 500,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <option value={10}>10 per page</option>
+                                <option value={20}>20 per page</option>
+                                <option value={50}>50 per page</option>
+                                <option value={100}>100 per page</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* Row 2: M3 Filter Chips */}
+                    <div className="flex flex-col gap-3">
+                        {/* Status Filter Chips */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--md-sys-color-on-surface-variant)', textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '0.25rem' }}>
+                                Status:
+                            </span>
+                            {[
+                                { id: 'all', label: 'All Statuses' },
+                                { id: 'paid', label: 'Paid' },
+                                { id: 'processing', label: 'Processing' },
+                                { id: 'rejected', label: 'Rejected' }
+                            ].map(chip => {
+                                const isSelected = (historyStatusFilter || 'all') === chip.id;
+                                return (
+                                    <button
+                                        key={chip.id}
+                                        type="button"
+                                        onClick={() => {
+                                            setHistoryStatusFilter(chip.id === 'all' ? '' : chip.id);
+                                            setHistoryCurrentPage(1);
+                                        }}
+                                        style={{
+                                            height: '32px',
+                                            padding: '0 0.875rem',
+                                            borderRadius: 'var(--md-sys-shape-corner-small)',
+                                            border: isSelected ? '1px solid var(--md-sys-color-primary)' : '1px solid var(--md-sys-color-outline-variant)',
+                                            backgroundColor: isSelected ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface)',
+                                            color: isSelected ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)',
+                                            fontSize: '0.8125rem',
+                                            fontWeight: isSelected ? 600 : 400,
+                                            cursor: 'pointer',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.375rem',
+                                            transition: 'all 0.15s ease'
+                                        }}
+                                    >
+                                        {isSelected && <Check size={14} />}
+                                        {chip.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        {/* Date Range Chips */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--md-sys-color-on-surface-variant)', textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '0.25rem' }}>
+                                Date Range:
+                            </span>
+                            {[
+                                { id: 'all', label: 'All Time' },
+                                { id: 'today', label: 'Today' },
+                                { id: 'thisWeek', label: 'This Week' },
+                                { id: 'lastWeek', label: 'Last Week' },
+                                { id: 'thisMonth', label: 'This Month' },
+                                { id: 'lastMonth', label: 'Last Month' }
+                            ].map(chip => {
+                                const isSelected = historyDateFilter === chip.id;
+                                return (
+                                    <button
+                                        key={chip.id}
+                                        type="button"
+                                        onClick={() => {
+                                            setHistoryDateFilter(chip.id);
+                                            setHistoryCurrentPage(1);
+                                        }}
+                                        style={{
+                                            height: '32px',
+                                            padding: '0 0.875rem',
+                                            borderRadius: 'var(--md-sys-shape-corner-small)',
+                                            border: isSelected ? '1px solid var(--md-sys-color-secondary)' : '1px solid var(--md-sys-color-outline-variant)',
+                                            backgroundColor: isSelected ? 'var(--md-sys-color-secondary-container)' : 'var(--md-sys-color-surface)',
+                                            color: isSelected ? 'var(--md-sys-color-on-secondary-container)' : 'var(--md-sys-color-on-surface)',
+                                            fontSize: '0.8125rem',
+                                            fontWeight: isSelected ? 600 : 400,
+                                            cursor: 'pointer',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.375rem',
+                                            transition: 'all 0.15s ease'
+                                        }}
+                                    >
+                                        {isSelected && <Check size={14} />}
+                                        {chip.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Clear All Filters Action Bar */}
+                    {(historySearchTerm || (historyStatusFilter && historyStatusFilter !== 'all') || historyDateFilter !== 'all') && (
+                        <div className="flex justify-between items-center mt-3 pt-3" style={{ borderTop: '1px solid var(--md-sys-color-outline-variant)' }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                                Active filters applied
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setHistorySearchTerm('');
+                                    setHistoryStatusFilter('');
+                                    setHistoryDateFilter('all');
+                                    setHistoryCurrentPage(1);
+                                }}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--md-sys-color-error)',
+                                    fontSize: '0.8125rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem'
+                                }}
+                            >
+                                <X size={14} /> Clear all filters
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
                     <div className="flex flex-col gap-2 mt-4">
-                        {getFilteredHistory().length === 0 ? (
+                        {totalHistoryCount === 0 ? (
                             <p className="text-center" style={{ color: 'var(--text-secondary)' }}>No matching batches found.</p>
                         ) : (
                             <>
@@ -832,22 +1110,22 @@ export default function AdminDashboard() {
                                     <div style={{ flex: 1, textAlign: 'center' }}>Documents</div>
                                 </div>
                                 {/* Body */}
-                                {getFilteredHistory().map(batch => (
+                                {paginatedHistory.map(batch => (
                                     <React.Fragment key={batch.id}>
                                         {/* Desktop Row */}
                                         <div className="glass-card flex justify-between items-center hide-on-mobile" style={{ padding: '1rem', boxShadow: 'none', backgroundColor: 'var(--bg-primary)', gap: '1rem', marginBottom: '1rem' }}>
                                             <div style={{ flex: 2, minWidth: '150px', fontWeight: 600 }}>
                                                 {formatOperatorName(batch.operatorId)}
                                             </div>
-                                            <div style={{ flex: 1, minWidth: '100px' }}>
-                                                {batch.paidAt ? (
-                                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                        <span>{getSafeDate(batch.paidAt).toLocaleDateString()}</span>
-                                                        <span style={{ fontSize: '0.75rem', color: 'var(--status-paid)' }}>Paid</span>
-                                                    </div>
-                                                ) : (
-                                                    batch.date ? getSafeDate(batch.date).toLocaleDateString() : 'N/A'
-                                                )}
+                                            <div style={{ flex: 1, minWidth: '130px' }}>
+                                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                    <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>{formatBatchDate(batch)}</span>
+                                                    {batch.paidAt && (
+                                                        <span style={{ fontSize: '0.75rem', color: 'var(--status-paid)', fontWeight: 600 }}>
+                                                            Paid {getSafeDate(batch.paidAt) ? getSafeDate(batch.paidAt).toLocaleDateString() : ''}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                             <div style={{ flex: 1, minWidth: '100px', display: 'flex', justifyContent: 'center' }}>
                                                 <div className="flex items-center gap-2">
@@ -892,7 +1170,7 @@ export default function AdminDashboard() {
                                                     <div>
                                                         <div style={{ fontWeight: 600, fontSize: '1rem' }}>{formatOperatorName(batch.operatorId)}</div>
                                                         <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
-                                                            <Calendar size={12} /> {batch.paidAt ? getSafeDate(batch.paidAt).toLocaleDateString() : (batch.date ? getSafeDate(batch.date).toLocaleDateString() : 'N/A')}
+                                                            <Calendar size={12} /> {formatBatchDate(batch)}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -932,6 +1210,52 @@ export default function AdminDashboard() {
                                         </div>
                                     </React.Fragment>
                                 ))}
+
+                                {/* Batch History Pagination Footer */}
+                                {totalHistoryPages > 1 && (
+                                    <div className="flex justify-between items-center mt-6 pt-4 flex-wrap gap-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                                        <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                            Page <strong style={{ color: 'var(--text-primary)' }}>{validHistoryCurrentPage}</strong> of <strong style={{ color: 'var(--text-primary)' }}>{totalHistoryPages}</strong> ({totalHistoryCount} total items)
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <button
+                                                className="btn btn-secondary btn-sm flex items-center gap-1"
+                                                disabled={validHistoryCurrentPage <= 1}
+                                                onClick={() => setHistoryCurrentPage(prev => Math.max(prev - 1, 1))}
+                                            >
+                                                <ChevronLeft size={16} /> Previous
+                                            </button>
+
+                                            <div className="flex gap-1 items-center">
+                                                {Array.from({ length: totalHistoryPages }, (_, i) => i + 1)
+                                                    .filter(page => page === 1 || page === totalHistoryPages || Math.abs(page - validHistoryCurrentPage) <= 1)
+                                                    .map((page, idx, arr) => (
+                                                        <React.Fragment key={page}>
+                                                            {idx > 0 && arr[idx - 1] !== page - 1 && (
+                                                                <span style={{ padding: '0 0.25rem', color: 'var(--text-secondary)' }}>...</span>
+                                                            )}
+                                                            <button
+                                                                className={`btn btn-sm ${page === validHistoryCurrentPage ? 'btn-primary' : 'btn-secondary'}`}
+                                                                style={{ minWidth: '32px', padding: '0 0.5rem' }}
+                                                                onClick={() => setHistoryCurrentPage(page)}
+                                                            >
+                                                                {page}
+                                                            </button>
+                                                        </React.Fragment>
+                                                    ))
+                                                }
+                                            </div>
+
+                                            <button
+                                                className="btn btn-secondary btn-sm flex items-center gap-1"
+                                                disabled={validHistoryCurrentPage >= totalHistoryPages}
+                                                onClick={() => setHistoryCurrentPage(prev => Math.min(prev + 1, totalHistoryPages))}
+                                            >
+                                                Next <ChevronRight size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </>
                         )}
                     </div>
@@ -976,33 +1300,173 @@ export default function AdminDashboard() {
                                 ))}
 
                                 <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
-                                    <h4 className="mb-2">Adjustments (Deductions/Reimbursements)</h4>
-                                    {selectedBatch.adjustments?.map((adj, idx) => (
-                                        <div key={idx} className="flex justify-between items-center mb-2" style={{ padding: '0.5rem', border: '1px solid var(--glass-border)', borderRadius: '0.25rem' }}>
-                                            <div>
-                                                <span style={{ color: adj.type === 'deduction' ? 'var(--status-error)' : 'var(--status-paid)', fontWeight: 600, marginRight: '0.5rem' }}>{adj.type === 'deduction' ? '-' : '+'}</span>
-                                                {adj.description}
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <span>${adj.amount.toFixed(2)}</span>
-                                                {(selectedBatch.status === 'pending' || selectedBatch.status === 'verified') && (
-                                                    <button onClick={() => handleRemoveAdjustment(idx)} style={{ color: 'var(--status-error)', cursor: 'pointer', background: 'none', border: 'none' }}>X</button>
-                                                )}
-                                            </div>
+                                    <div className="flex justify-between items-center mb-3">
+                                        <div>
+                                            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Pay Adjustments</h4>
+                                            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Add deductions, reimbursements, or bonuses to this batch before finalizing payroll.</p>
                                         </div>
-                                    ))}
+                                        {selectedBatch.adjustments && selectedBatch.adjustments.length > 0 && (
+                                            <span className="badge badge-verified" style={{ fontSize: '0.75rem' }}>
+                                                {selectedBatch.adjustments.length} adjustment{selectedBatch.adjustments.length > 1 ? 's' : ''}
+                                            </span>
+                                        )}
+                                    </div>
 
+                                    {/* List of Existing Adjustments */}
+                                    {selectedBatch.adjustments?.length > 0 && (
+                                        <div className="flex flex-col gap-2 mb-4">
+                                            {selectedBatch.adjustments.map((adj, idx) => (
+                                                <div key={idx} className="flex justify-between items-center p-3" style={{
+                                                    backgroundColor: adj.type === 'deduction' ? 'rgba(220, 38, 38, 0.04)' : 'rgba(5, 150, 105, 0.04)',
+                                                    border: `1px solid ${adj.type === 'deduction' ? 'rgba(220, 38, 38, 0.2)' : 'rgba(5, 150, 105, 0.2)'}`,
+                                                    borderRadius: 'var(--border-radius-md)'
+                                                }}>
+                                                    <div className="flex items-center gap-3">
+                                                        <span className={`badge ${adj.type === 'deduction' ? 'badge-rejected' : 'badge-paid'}`} style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}>
+                                                            {adj.type.toUpperCase()}
+                                                        </span>
+                                                        <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>{adj.description}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3">
+                                                        <span style={{
+                                                            fontWeight: 700,
+                                                            fontSize: '0.9375rem',
+                                                            color: adj.type === 'deduction' ? 'var(--status-error)' : 'var(--status-paid)'
+                                                        }}>
+                                                            {adj.type === 'deduction' ? '-' : '+'}${Number(adj.amount).toFixed(2)}
+                                                        </span>
+                                                        {(selectedBatch.status === 'pending' || selectedBatch.status === 'verified') && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleRemoveAdjustment(idx)}
+                                                                title="Remove adjustment"
+                                                                style={{
+                                                                    color: 'var(--status-error)',
+                                                                    cursor: 'pointer',
+                                                                    background: 'rgba(220, 38, 38, 0.1)',
+                                                                    border: 'none',
+                                                                    borderRadius: '50%',
+                                                                    width: '24px',
+                                                                    height: '24px',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    fontSize: '0.75rem',
+                                                                    fontWeight: 'bold',
+                                                                    transition: 'background 0.15s'
+                                                                }}
+                                                            >
+                                                                <Trash2 size={12} />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Form to Add New Adjustment */}
                                     {(selectedBatch.status === 'pending' || selectedBatch.status === 'verified') && (
-                                        <form onSubmit={handleAddAdjustment} className="flex gap-2 mt-2">
-                                            <select className="form-input" style={{ width: 'auto', padding: '0.5rem' }} value={adjType} onChange={e => setAdjType(e.target.value)}>
-                                                <option value="deduction">Deduct</option>
-                                                <option value="reimbursement">Reimburse</option>
-                                                <option value="bonus">Bonus</option>
-                                            </select>
-                                            <input type="text" className="form-input" placeholder="Desc" required value={adjDesc} onChange={e => setAdjDesc(e.target.value)} />
-                                            <input type="number" step="0.01" className="form-input" placeholder="$0.00" style={{ width: '80px' }} required value={adjAmount} onChange={e => setAdjAmount(e.target.value)} />
-                                            <button type="submit" className="btn btn-secondary" style={{ padding: '0.5rem 1rem' }}>Add</button>
-                                        </form>
+                                        <div style={{
+                                            backgroundColor: 'var(--bg-tertiary)',
+                                            border: '1px solid var(--glass-border)',
+                                            borderRadius: 'var(--border-radius-md)',
+                                            padding: '1rem'
+                                        }}>
+                                            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>
+                                                Add New Adjustment
+                                            </div>
+                                            <form onSubmit={handleAddAdjustment} className="flex flex-col gap-3">
+                                                <div style={{
+                                                    display: 'grid',
+                                                    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                                                    gap: '0.75rem',
+                                                    alignItems: 'end'
+                                                }}>
+                                                    {/* 1. Type Dropdown */}
+                                                    <div style={{ minWidth: '130px' }}>
+                                                        <label className="form-label" style={{ fontSize: '0.75rem', marginBottom: '0.25rem' }}>Type</label>
+                                                        <select
+                                                            className="form-input"
+                                                            style={{
+                                                                height: 'var(--control-height)',
+                                                                fontWeight: 500,
+                                                                cursor: 'pointer',
+                                                                backgroundColor: 'var(--bg-secondary)',
+                                                                width: '100%'
+                                                            }}
+                                                            value={adjType}
+                                                            onChange={e => setAdjType(e.target.value)}
+                                                        >
+                                                            <option value="deduction">Deduction (-)</option>
+                                                            <option value="reimbursement">Reimbursement (+)</option>
+                                                            <option value="bonus">Bonus (+)</option>
+                                                        </select>
+                                                    </div>
+
+                                                    {/* 2. Description Input */}
+                                                    <div style={{ gridColumn: 'span 2', minWidth: '180px' }}>
+                                                        <label className="form-label" style={{ fontSize: '0.75rem', marginBottom: '0.25rem' }}>Description</label>
+                                                        <input
+                                                            type="text"
+                                                            className="form-input"
+                                                            placeholder="e.g. Boot repair fee, Fuel reimbursement..."
+                                                            required
+                                                            value={adjDesc}
+                                                            onChange={e => setAdjDesc(e.target.value)}
+                                                            style={{ height: 'var(--control-height)', backgroundColor: 'var(--bg-secondary)', width: '100%' }}
+                                                        />
+                                                    </div>
+
+                                                    {/* 3. Amount Field with $ Prefix */}
+                                                    <div style={{ minWidth: '120px' }}>
+                                                        <label className="form-label" style={{ fontSize: '0.75rem', marginBottom: '0.25rem' }}>Amount</label>
+                                                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                                            <span style={{
+                                                                position: 'absolute',
+                                                                left: '0.75rem',
+                                                                color: 'var(--text-secondary)',
+                                                                fontWeight: 600,
+                                                                fontSize: '0.875rem',
+                                                                pointerEvents: 'none'
+                                                            }}>$</span>
+                                                            <input
+                                                                type="number"
+                                                                step="0.01"
+                                                                min="0.01"
+                                                                className="form-input"
+                                                                placeholder="0.00"
+                                                                required
+                                                                value={adjAmount}
+                                                                onChange={e => setAdjAmount(e.target.value)}
+                                                                style={{
+                                                                    height: 'var(--control-height)',
+                                                                    paddingLeft: '1.75rem',
+                                                                    backgroundColor: 'var(--bg-secondary)',
+                                                                    fontWeight: 600,
+                                                                    width: '100%'
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* 4. Full-Width Add Adjustment Submit Button */}
+                                                <button
+                                                    type="submit"
+                                                    className="btn btn-primary"
+                                                    style={{
+                                                        height: 'var(--control-height)',
+                                                        width: '100%',
+                                                        justifyContent: 'center',
+                                                        fontWeight: 600,
+                                                        marginTop: '0.25rem'
+                                                    }}
+                                                >
+                                                    <Plus size={16} /> Add Adjustment
+                                                </button>
+                                            </form>
+                                        </div>
                                     )}
                                 </div>
                             </div>

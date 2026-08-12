@@ -82,6 +82,7 @@ export default function NewBatch() {
       const batchRef = await addDoc(collection(db, 'batches'), {
         operatorId: auth.currentUser.uid,
         date: serverTimestamp(),
+        createdAt: new Date().toISOString(),
         status: 'draft', // Optional for manual
         batchTicketUrl: finalTicketUrl || null, // Optional for manual
         batchTotalAmount: finalData.batchTotalAmount,
