@@ -514,9 +514,9 @@ tr:last-child td {
     padding: 0 !important;
   }
   
-  .form-input {
+  .form-input, input, select, textarea {
     height: 2.75rem; /* 44px touch target height */
-    font-size: 0.9375rem; /* Prevents auto-zoom on mobile Safari */
+    font-size: 16px !important; /* 16px minimum prevents iOS Mobile Safari auto-zoom on tap/focus */
     padding: 0 0.875rem;
     max-width: 100% !important;
   }
