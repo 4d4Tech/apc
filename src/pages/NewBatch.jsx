@@ -101,7 +101,7 @@ export default function NewBatch() {
   return (
     <div>
 
-      <div className="flex gap-4 mb-6">
+      <div className="flex flex-responsive gap-4 mb-6">
         <button 
           className={`btn ${entryMode === 'manual' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setEntryMode('manual')}
@@ -122,7 +122,7 @@ export default function NewBatch() {
             <h3>1. Upload Daily Batch Ticket</h3>
             <p className="form-label mb-4">Take a photo of the terminal summary receipt.</p>
             
-            <div className="form-group flex gap-4 items-center">
+            <div className="form-group flex flex-responsive gap-4 items-center">
               <input type="file" accept="image/*" onChange={handleFileChange} className="form-input" />
               <button 
                 className="btn btn-primary" 

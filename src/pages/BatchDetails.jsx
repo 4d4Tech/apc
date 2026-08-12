@@ -77,6 +77,12 @@ export default function BatchDetails() {
     e.preventDefault();
     if (!editingTx) return;
 
+    const totalPhotos = editExistingPhotos.length + editTxPics.length;
+    if (totalPhotos === 0) {
+        alert("Transaction photo is required. Please attach at least one photo.");
+        return;
+    }
+
     // Optimistically update UI
     setTransactions(prev => prev.map(t => {
         if (t.id === editingTx.id) {
@@ -146,7 +152,10 @@ export default function BatchDetails() {
   const handleAddTransaction = async (e) => {
     e.preventDefault();
     
-    // cardLast4 is required by the form input attribute already
+    if (!txPics || txPics.length === 0) {
+        alert("Transaction photo is required. Please attach at least one photo before saving.");
+        return;
+    }
     
     // Capture current form state
     const tempId = `temp_${Date.now()}`;
@@ -366,8 +375,21 @@ export default function BatchDetails() {
           </div>
 
           <div className="form-group">
-             <label className="form-label">Transaction Photos (Optional)</label>
-             <input id="txPhotosInput" type="file" accept="image/*" multiple onChange={e => setTxPics(Array.from(e.target.files))} className="form-input" />
+             <label className="form-label">
+               Transaction Photos <span style={{ color: '#ef4444', fontWeight: 'bold' }}>* (Required)</span>
+             </label>
+             <input
+               id="txPhotosInput"
+               type="file"
+               accept="image/*"
+               multiple
+               required
+               onChange={e => setTxPics(Array.from(e.target.files))}
+               className="form-input"
+             />
+             <small style={{ color: 'var(--text-secondary)', display: 'block', marginTop: '4px' }}>
+               At least one photo of vehicle, boot, or receipt is required.
+             </small>
           </div>
 
           <button type="submit" className="btn btn-primary mt-4" style={{ width: '100%' }} disabled={isMatched}>
@@ -522,9 +544,13 @@ export default function BatchDetails() {
               </div>
 
               <div className="form-group">
-                 <label className="form-label">Add More Photos (Optional)</label>
+                 <label className="form-label">
+                   Photos <span style={{ color: editExistingPhotos.length === 0 ? '#ef4444' : 'var(--text-secondary)', fontWeight: 'bold' }}>* (At least 1 photo required)</span>
+                 </label>
                  <input type="file" accept="image/*" multiple onChange={e => setEditTxPics(Array.from(e.target.files))} className="form-input" />
-                 <small style={{color:'var(--text-secondary)'}}>These will be added to the existing photos.</small>
+                 <small style={{ color: 'var(--text-secondary)', display: 'block', marginTop: '4px' }}>
+                   {editExistingPhotos.length > 0 ? `Currently keeping ${editExistingPhotos.length} existing photo(s). New photos will be appended.` : 'At least one photo must be attached.'}
+                 </small>
               </div>
 
               <div className="flex justify-end gap-4 flex-responsive mt-6 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>

@@ -888,7 +888,7 @@ export default function AdminDashboard() {
                     {/* Row 1: M3 Search Field & Rows Per Page Dropdown */}
                     <div className="flex gap-4 items-center mb-4 flex-wrap">
                         {/* M3 Search Field with leading Search Icon */}
-                        <div style={{ flex: '1 1 300px', position: 'relative', display: 'flex', alignItems: 'center' }}>
+                        <div style={{ flex: '1 1 300px', width: '100%', maxWidth: '100%', position: 'relative', display: 'flex', alignItems: 'center' }}>
                             <Search
                                 size={20}
                                 style={{

@@ -416,7 +416,7 @@ export default function OperatorDashboard() {
           {/* Row 1: M3 Search Field & Rows Per Page Selector */}
           <div className="flex gap-4 items-center mb-4 flex-wrap">
             {/* Search Input */}
-            <div style={{ flex: '1 1 300px', position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <div style={{ flex: '1 1 300px', width: '100%', maxWidth: '100%', position: 'relative', display: 'flex', alignItems: 'center' }}>
               <Search
                 size={20}
                 style={{
