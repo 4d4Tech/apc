@@ -4,11 +4,56 @@ import { collection, query, where, orderBy, getDocs, doc, getDoc, updateDoc, set
 import { db, auth } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { MessageSquare, FileText, CheckCircle, AlertCircle, Clock, Download, Bell, Settings } from 'lucide-react';
+import { MessageSquare, FileText, CheckCircle, AlertCircle, Clock, Download, Bell, Settings, Search, Filter, X, Check, SlidersHorizontal, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { generate1099PDF } from '../utils/pdfGenerator';
 import { PiiInput } from '../components/PiiInput';
 import { encryptPii, decryptPii, maskPii, extractLast4, isValidSsnOrEin } from '../utils/piiCrypto';
+
+const getSafeDate = (d) => {
+  if (!d) return null;
+  try {
+    if (d instanceof Date) return isNaN(d.getTime()) ? null : d;
+    if (typeof d.toDate === 'function') {
+      const dt = d.toDate();
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+    if (typeof d === 'object' && typeof d.seconds === 'number') {
+      return new Date(d.seconds * 1000);
+    }
+    if (typeof d === 'number') {
+      return new Date(d);
+    }
+    if (typeof d === 'string') {
+      const parsed = new Date(d);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+  } catch (e) {
+    return null;
+  }
+  return null;
+};
+
+const getBatchDateObj = (batch) => {
+  if (!batch) return null;
+  return getSafeDate(batch.paidAt) ||
+         getSafeDate(batch.date) ||
+         getSafeDate(batch.createdAt) ||
+         getSafeDate(batch.timestamp) ||
+         getSafeDate(batch.updatedAt);
+};
+
+const formatBatchDate = (batch) => {
+  const dt = getBatchDateObj(batch);
+  if (!dt) return 'N/A';
+  return dt.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
 
 export default function OperatorDashboard() {
   const { userData } = useAuth();
@@ -28,6 +73,13 @@ export default function OperatorDashboard() {
     ssnOrEin: ''
   });
 
+  // Filter & Pagination States
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('');
+  const [historyDateFilter, setHistoryDateFilter] = useState('all');
+  const [historyItemsPerPage, setHistoryItemsPerPage] = useState(10);
+  const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -41,15 +93,14 @@ export default function OperatorDashboard() {
         const querySnapshot = await getDocs(q);
         let batchData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         batchData.sort((a, b) => {
-          const getSortTime = (batch) => {
-            if (batch.date) return batch.date.seconds ? batch.date.seconds * 1000 : new Date(batch.date).getTime();
-            return 0;
-          };
-          return getSortTime(b) - getSortTime(a);
+          const dtA = getBatchDateObj(a);
+          const dtB = getBatchDateObj(b);
+          const timeA = dtA ? dtA.getTime() : 0;
+          const timeB = dtB ? dtB.getTime() : 0;
+          return timeB - timeA;
         });
         setBatches(batchData);
       } catch (err) {
-        // Requires index error might happen if not created, but we can catch it
         console.error("Error fetching batches:", err);
       } finally {
         setLoading(false);
@@ -117,10 +168,84 @@ export default function OperatorDashboard() {
     return total;
   };
 
+  const getFilteredBatches = () => {
+    let filtered = [...batches];
+
+    if (historyStatusFilter && historyStatusFilter !== 'all') {
+      filtered = filtered.filter(b => {
+        const effectiveStatus = b.status === 'archived' ? 'paid' : b.status;
+        return effectiveStatus === historyStatusFilter;
+      });
+    }
+
+    if (historySearchTerm) {
+      const lowerSearch = historySearchTerm.toLowerCase();
+      filtered = filtered.filter(b => {
+        const idMatch = b.id.toLowerCase().includes(lowerSearch);
+        const bootsMatch = (b.expectedItemCount || '').toString().includes(lowerSearch);
+        const notesMatch = (b.reviewNotes || '').toLowerCase().includes(lowerSearch);
+        return idMatch || bootsMatch || notesMatch;
+      });
+    }
+
+    if (historyDateFilter && historyDateFilter !== 'all') {
+      const now = new Date();
+      filtered = filtered.filter(b => {
+        const batchDate = getBatchDateObj(b);
+        if (!batchDate) return false;
+
+        if (historyDateFilter === 'today') {
+          const startOfToday = new Date(now);
+          startOfToday.setHours(0, 0, 0, 0);
+          return batchDate >= startOfToday;
+        } else if (historyDateFilter === 'thisWeek') {
+          const startOfWeek = new Date(now);
+          startOfWeek.setDate(now.getDate() - now.getDay());
+          startOfWeek.setHours(0, 0, 0, 0);
+          return batchDate >= startOfWeek;
+        } else if (historyDateFilter === 'lastWeek') {
+          const startOfThisWeek = new Date(now);
+          startOfThisWeek.setDate(now.getDate() - now.getDay());
+          startOfThisWeek.setHours(0, 0, 0, 0);
+          const startOfLastWeek = new Date(startOfThisWeek);
+          startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
+          return batchDate >= startOfLastWeek && batchDate < startOfThisWeek;
+        } else if (historyDateFilter === 'thisMonth') {
+          const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+          return batchDate >= startOfMonth;
+        } else if (historyDateFilter === 'lastMonth') {
+          const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+          return batchDate >= startOfLastMonth && batchDate < startOfThisMonth;
+        }
+        return true;
+      });
+    }
+
+    filtered.sort((a, b) => {
+      const dtA = getBatchDateObj(a);
+      const dtB = getBatchDateObj(b);
+      const timeA = dtA ? dtA.getTime() : 0;
+      const timeB = dtB ? dtB.getTime() : 0;
+      return timeB - timeA;
+    });
+
+    return filtered;
+  };
+
   const totalBoots = batches.reduce((acc, batch) => acc + (batch.expectedItemCount || 0), 0);
   const pendingPay = batches
     .filter(b => ['pending', 'verified', 'processing'].includes(b.status))
     .reduce((acc, batch) => acc + getBatchPayout(batch), 0);
+
+  // Pagination calculations for Operator Batch History
+  const allFilteredHistory = getFilteredBatches();
+  const totalHistoryCount = allFilteredHistory.length;
+  const totalHistoryPages = Math.ceil(totalHistoryCount / historyItemsPerPage) || 1;
+  const validHistoryCurrentPage = Math.min(Math.max(1, historyCurrentPage), totalHistoryPages);
+  const historyStartIndex = (validHistoryCurrentPage - 1) * historyItemsPerPage;
+  const historyEndIndex = Math.min(historyStartIndex + historyItemsPerPage, totalHistoryCount);
+  const paginatedHistory = allFilteredHistory.slice(historyStartIndex, historyEndIndex);
 
   const handleDownload1099 = async (docData) => {
     try {
@@ -255,8 +380,253 @@ export default function OperatorDashboard() {
         </div>
       </div>
 
-      <div className="glass-card">
-        <h3 style={{ marginBottom: '1rem' }}>Recent Batches</h3>
+      {/* M3 Recent Batches Section */}
+      <div className="glass-card" style={{ padding: '1.75rem', borderRadius: 'var(--md-sys-shape-corner-extra-large)' }}>
+        {/* Section Header */}
+        <div className="flex justify-between items-center mb-6 flex-responsive gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <SlidersHorizontal size={20} style={{ color: 'var(--md-sys-color-primary)' }} />
+              <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Batch History</h3>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.84375rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+              Filter and search through your submitted boot batches and payout history.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="badge" style={{
+              backgroundColor: 'var(--md-sys-color-primary-container)',
+              color: 'var(--md-sys-color-on-primary-container)',
+              fontSize: '0.75rem',
+              padding: '0.25rem 0.75rem'
+            }}>
+              {totalHistoryCount} record{totalHistoryCount !== 1 ? 's' : ''} found
+            </span>
+          </div>
+        </div>
+
+        {/* M3 Search Bar & Filter Controls Container */}
+        <div style={{
+          backgroundColor: 'var(--md-sys-color-surface-variant)',
+          borderRadius: 'var(--md-sys-shape-corner-medium)',
+          padding: '1.25rem',
+          marginBottom: '1.5rem',
+          border: '1px solid var(--md-sys-color-outline-variant)'
+        }}>
+          {/* Row 1: M3 Search Field & Rows Per Page Selector */}
+          <div className="flex gap-4 items-center mb-4 flex-wrap">
+            {/* Search Input */}
+            <div style={{ flex: '1 1 300px', position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search
+                size={20}
+                style={{
+                  position: 'absolute',
+                  left: '1rem',
+                  color: 'var(--md-sys-color-on-surface-variant)',
+                  pointerEvents: 'none'
+                }}
+              />
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Search batch ID, boots count, or notes..."
+                value={historySearchTerm}
+                onChange={e => {
+                  setHistorySearchTerm(e.target.value);
+                  setHistoryCurrentPage(1);
+                }}
+                style={{
+                  height: '44px',
+                  paddingLeft: '2.75rem',
+                  paddingRight: historySearchTerm ? '2.5rem' : '1rem',
+                  backgroundColor: 'var(--md-sys-color-surface)',
+                  borderRadius: 'var(--md-sys-shape-corner-large)',
+                  border: '1px solid var(--md-sys-color-outline)',
+                  fontSize: '0.9375rem'
+                }}
+              />
+              {historySearchTerm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHistorySearchTerm('');
+                    setHistoryCurrentPage(1);
+                  }}
+                  style={{
+                    position: 'absolute',
+                    right: '0.75rem',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                    cursor: 'pointer',
+                    padding: '0.25rem',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                  title="Clear search"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+
+            {/* Rows Per Page Dropdown */}
+            <div className="flex items-center gap-2" style={{ flex: '0 0 auto' }}>
+              <label style={{ fontSize: '0.84375rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                Rows:
+              </label>
+              <select
+                className="form-input"
+                value={historyItemsPerPage}
+                onChange={e => {
+                  setHistoryItemsPerPage(Number(e.target.value));
+                  setHistoryCurrentPage(1);
+                }}
+                style={{
+                  height: '44px',
+                  padding: '0 2rem 0 1rem',
+                  backgroundColor: 'var(--md-sys-color-surface)',
+                  borderRadius: 'var(--md-sys-shape-corner-medium)',
+                  border: '1px solid var(--md-sys-color-outline)',
+                  fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                <option value={10}>10 per page</option>
+                <option value={20}>20 per page</option>
+                <option value={50}>50 per page</option>
+                <option value={100}>100 per page</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Row 2: Filter Chips */}
+          <div className="flex flex-col gap-3">
+            {/* Status Filter Chips */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--md-sys-color-on-surface-variant)', textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '0.25rem' }}>
+                Status:
+              </span>
+              {[
+                { id: 'all', label: 'All Statuses' },
+                { id: 'pending', label: 'Pending' },
+                { id: 'verified', label: 'Verified' },
+                { id: 'processing', label: 'Processing' },
+                { id: 'paid', label: 'Paid' },
+                { id: 'rejected', label: 'Rejected' },
+                { id: 'draft', label: 'Draft' }
+              ].map(chip => {
+                const isSelected = (historyStatusFilter || 'all') === chip.id;
+                return (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => {
+                      setHistoryStatusFilter(chip.id === 'all' ? '' : chip.id);
+                      setHistoryCurrentPage(1);
+                    }}
+                    style={{
+                      height: '32px',
+                      padding: '0 0.875rem',
+                      borderRadius: 'var(--md-sys-shape-corner-small)',
+                      border: isSelected ? '1px solid var(--md-sys-color-primary)' : '1px solid var(--md-sys-color-outline-variant)',
+                      backgroundColor: isSelected ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface)',
+                      color: isSelected ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)',
+                      fontSize: '0.8125rem',
+                      fontWeight: isSelected ? 600 : 400,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.375rem',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {isSelected && <Check size={14} />}
+                    {chip.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Date Range Chips */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--md-sys-color-on-surface-variant)', textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '0.25rem' }}>
+                Date Range:
+              </span>
+              {[
+                { id: 'all', label: 'All Time' },
+                { id: 'today', label: 'Today' },
+                { id: 'thisWeek', label: 'This Week' },
+                { id: 'lastWeek', label: 'Last Week' },
+                { id: 'thisMonth', label: 'This Month' },
+                { id: 'lastMonth', label: 'Last Month' }
+              ].map(chip => {
+                const isSelected = historyDateFilter === chip.id;
+                return (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => {
+                      setHistoryDateFilter(chip.id);
+                      setHistoryCurrentPage(1);
+                    }}
+                    style={{
+                      height: '32px',
+                      padding: '0 0.875rem',
+                      borderRadius: 'var(--md-sys-shape-corner-small)',
+                      border: isSelected ? '1px solid var(--md-sys-color-secondary)' : '1px solid var(--md-sys-color-outline-variant)',
+                      backgroundColor: isSelected ? 'var(--md-sys-color-secondary-container)' : 'var(--md-sys-color-surface)',
+                      color: isSelected ? 'var(--md-sys-color-on-secondary-container)' : 'var(--md-sys-color-on-surface)',
+                      fontSize: '0.8125rem',
+                      fontWeight: isSelected ? 600 : 400,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.375rem',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {isSelected && <Check size={14} />}
+                    {chip.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Active Filters Clear Button */}
+          {(historySearchTerm || (historyStatusFilter && historyStatusFilter !== 'all') || historyDateFilter !== 'all') && (
+            <div className="flex justify-between items-center mt-3 pt-3" style={{ borderTop: '1px solid var(--md-sys-color-outline-variant)' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                Active filters applied
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setHistorySearchTerm('');
+                  setHistoryStatusFilter('');
+                  setHistoryDateFilter('all');
+                  setHistoryCurrentPage(1);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--md-sys-color-error)',
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.25rem'
+                }}
+              >
+                <X size={14} /> Clear all filters
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Batches Table / Card List */}
         {loading ? (
           <div className="flex flex-col gap-2 mt-4">
             <SkeletonLoader type="card" />
@@ -265,50 +635,102 @@ export default function OperatorDashboard() {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {batches.length === 0 ? <p style={{ color: 'var(--text-secondary)' }}>No batches found.</p> : null}
-            {batches.map(batch => (
-              <div key={batch.id} className="glass-card flex justify-between items-center flex-stack-mobile" style={{ padding: '1rem', backgroundColor: 'var(--bg-primary)', boxShadow: 'none', gap: '1rem' }}>
-                <div style={{ flex: 1, minWidth: '120px' }}>
-                  <div style={{ fontWeight: 500 }}>
-                    {batch.paidAt
-                      ? `${new Date(batch.paidAt.seconds ? batch.paidAt.seconds * 1000 : batch.paidAt).toLocaleDateString()} (Paid)`
-                      : (batch.date ? new Date(batch.date.seconds ? batch.date.seconds * 1000 : batch.date).toLocaleDateString() : 'N/A')}
-                  </div>
-                  <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                    {batch.expectedItemCount} boots
-                  </div>
-                </div>
+            {totalHistoryCount === 0 ? (
+              <p className="text-center py-4" style={{ color: 'var(--text-secondary)' }}>No matching batches found.</p>
+            ) : (
+              <>
+                {paginatedHistory.map(batch => {
+                  const effectiveStatus = batch.status === 'archived' ? 'paid' : batch.status;
+                  return (
+                    <div key={batch.id} className="glass-card flex justify-between items-center flex-stack-mobile" style={{ padding: '1rem', backgroundColor: 'var(--bg-primary)', boxShadow: 'none', gap: '1rem' }}>
+                      <div style={{ flex: 1, minWidth: '160px' }}>
+                        <div style={{ fontWeight: 500, fontSize: '0.9375rem' }}>
+                          {formatBatchDate(batch)}
+                        </div>
+                        <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          {batch.expectedItemCount} boots
+                        </div>
+                      </div>
 
-                <div className="flex items-center gap-2" style={{ flex: 1, justifyContent: 'center', minWidth: '150px' }}>
-                  <div className={`badge badge-${batch.status === 'archived' ? 'paid' : batch.status}`}>
-                    {batch.status === 'archived' ? 'paid' : batch.status}
-                  </div>
-                  {batch.reviewNotes && (
-                    <MessageSquare
-                      size={16}
-                      style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
-                      title={batch.reviewNotes}
-                      onClick={() => alert(`Admin Note:\n\n${batch.reviewNotes}`)}
-                    />
-                  )}
-                  {(batch.status === 'rejected' || batch.status === 'draft') && (
-                    <button
-                      className="btn btn-secondary"
-                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                      onClick={() => navigate(`/operator/batch/${batch.id}`)}
-                    >
-                      {batch.status === 'draft' ? 'Resume Draft' : 'Fix & Resubmit'}
-                    </button>
-                  )}
-                </div>
+                      <div className="flex items-center gap-2" style={{ flex: 1, justifyContent: 'center', minWidth: '150px' }}>
+                        <span className={`badge badge-${effectiveStatus}`}>
+                          {effectiveStatus}
+                        </span>
+                        {batch.reviewNotes && (
+                          <MessageSquare
+                            size={16}
+                            style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
+                            title={batch.reviewNotes}
+                            onClick={() => alert(`Admin Note:\n\n${batch.reviewNotes}`)}
+                          />
+                        )}
+                        {(batch.status === 'rejected' || batch.status === 'draft') && (
+                          <button
+                            className="btn btn-secondary"
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                            onClick={() => navigate(`/operator/batch/${batch.id}`)}
+                          >
+                            {batch.status === 'draft' ? 'Resume Draft' : 'Fix & Resubmit'}
+                          </button>
+                        )}
+                      </div>
 
-                <div style={{ flex: 1, textAlign: 'right', minWidth: '80px' }}>
-                  <span style={{ fontWeight: 200, fontSize: '1rem', color: 'var(--text-primary)' }}>
-                    {['paid', 'processing', 'archived'].includes(batch.status) ? `$${getBatchPayout(batch).toFixed(2)}` : '--'}
-                  </span>
-                </div>
-              </div>
-            ))}
+                      <div style={{ flex: 1, textAlign: 'right', minWidth: '100px' }}>
+                        <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>
+                          {['paid', 'processing', 'archived', 'verified'].includes(batch.status) ? `$${getBatchPayout(batch).toFixed(2)}` : '--'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Operator Pagination Footer */}
+                {totalHistoryPages > 1 && (
+                  <div className="flex justify-between items-center mt-6 pt-4 flex-wrap gap-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Page <strong style={{ color: 'var(--text-primary)' }}>{validHistoryCurrentPage}</strong> of <strong style={{ color: 'var(--text-primary)' }}>{totalHistoryPages}</strong> ({totalHistoryCount} total items)
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        className="btn btn-secondary btn-sm flex items-center gap-1"
+                        disabled={validHistoryCurrentPage <= 1}
+                        onClick={() => setHistoryCurrentPage(prev => Math.max(prev - 1, 1))}
+                      >
+                        <ChevronLeft size={16} /> Previous
+                      </button>
+
+                      <div className="flex gap-1 items-center">
+                        {Array.from({ length: totalHistoryPages }, (_, i) => i + 1)
+                          .filter(page => page === 1 || page === totalHistoryPages || Math.abs(page - validHistoryCurrentPage) <= 1)
+                          .map((page, idx, arr) => (
+                            <React.Fragment key={page}>
+                              {idx > 0 && arr[idx - 1] !== page - 1 && (
+                                <span style={{ padding: '0 0.25rem', color: 'var(--text-secondary)' }}>...</span>
+                              )}
+                              <button
+                                className={`btn btn-sm ${page === validHistoryCurrentPage ? 'btn-primary' : 'btn-secondary'}`}
+                                style={{ minWidth: '32px', padding: '0 0.5rem' }}
+                                onClick={() => setHistoryCurrentPage(page)}
+                              >
+                                {page}
+                              </button>
+                            </React.Fragment>
+                          ))
+                        }
+                      </div>
+
+                      <button
+                        className="btn btn-secondary btn-sm flex items-center gap-1"
+                        disabled={validHistoryCurrentPage >= totalHistoryPages}
+                        onClick={() => setHistoryCurrentPage(prev => Math.min(prev + 1, totalHistoryPages))}
+                      >
+                        Next <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>
