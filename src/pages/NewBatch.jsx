@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
 import { db, auth, storage, functions } from '../firebase';
@@ -17,6 +17,28 @@ export default function NewBatch() {
   const [searchParams] = useSearchParams();
   const existingGroupId = searchParams.get('groupId');
   const { userData } = useAuth();
+
+  useEffect(() => {
+    if (!existingGroupId || !auth.currentUser) return;
+    const checkGroupStatus = async () => {
+      try {
+        const q = query(
+          collection(db, 'batches'),
+          where('operatorId', '==', auth.currentUser.uid),
+          where('groupId', '==', existingGroupId)
+        );
+        const snap = await getDocs(q);
+        const isPaid = snap.docs.some(d => ['paid', 'processing', 'verified'].includes(d.data().status));
+        if (isPaid) {
+          alert("This batch group has already been finalized or paid. You cannot add additional tickets to a paid batch. Starting a new batch submission instead.");
+          navigate('/operator/new-batch', { replace: true });
+        }
+      } catch (err) {
+        console.error("Error checking group status:", err);
+      }
+    };
+    checkGroupStatus();
+  }, [existingGroupId, navigate]);
 
   const handleFileChange = (e) => {
     if (e.target.files[0]) {

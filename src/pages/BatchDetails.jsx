@@ -645,13 +645,13 @@ export default function BatchDetails() {
       {['pending', 'verified', 'processing', 'paid'].includes(batch.status) && (
         <div className="glass-card mt-8 flex justify-between items-center flex-responsive gap-4" style={{ backgroundColor: 'var(--md-sys-color-surface-variant)', border: '1px solid var(--md-sys-color-outline-variant)' }}>
           <div>
-            <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>Need to submit another boot ticket for this pay period?</div>
+            <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>Need to submit a new batch for another pay period?</div>
             <div style={{ fontSize: '0.84375rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-              You can submit multiple summary tickets and vehicle transactions for a single pay period.
+              Finalized or paid batches cannot be modified. You can start a new standalone batch submission anytime.
             </div>
           </div>
           <button className="btn btn-primary" onClick={() => navigate('/operator/new-batch')} style={{ whiteSpace: 'nowrap' }}>
-            + Add Another Batch / Ticket
+            + Start New Batch Submission
           </button>
         </div>
       )}
