@@ -89,6 +89,7 @@ export default function AdminDashboard() {
     const [isAddingOp, setIsAddingOp] = useState(false);
     const [addOpError, setAddOpError] = useState('');
     const [reviewNotes, setReviewNotes] = useState('');
+    const [activeGroupBatches, setActiveGroupBatches] = useState([]);
     const [showPayrollModal, setShowPayrollModal] = useState(false);
     const [payrollSummary, setPayrollSummary] = useState([]);
     const [isProcessingPayroll, setIsProcessingPayroll] = useState(false);
@@ -209,7 +210,23 @@ export default function AdminDashboard() {
         return `Operator (${operatorId.slice(0, 8)}...)`;
     };
 
-    const handleViewDocs = async (batch) => {
+    const handleViewDocs = async (batch, customGroupBatches = null) => {
+        setSelectedBatch(batch);
+        const targetGroup = customGroupBatches || (batch.groupId
+            ? batches.filter(b => b.groupId === batch.groupId && b.status === 'pending')
+            : batches.filter(b => b.operatorId === batch.operatorId && b.status === 'pending'));
+
+        setActiveGroupBatches(targetGroup.length > 0 ? targetGroup : [batch]);
+
+        try {
+            const txSnap = await getDocs(collection(db, `batches/${batch.id}/transactions`));
+            setTxDetails(txSnap.docs.map(d => d.data()));
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleSelectBatchInGroup = async (batch) => {
         setSelectedBatch(batch);
         try {
             const txSnap = await getDocs(collection(db, `batches/${batch.id}/transactions`));
@@ -221,27 +238,27 @@ export default function AdminDashboard() {
 
     const handleCloseModal = () => {
         setSelectedBatch(null);
+        setActiveGroupBatches([]);
         setTxDetails([]);
         setReviewNotes('');
     };
 
-    const updateBatchStatus = async (batchId, status, notes = '') => {
-        // Optimistic UI update
-        setBatches(prev => prev.map(b => b.id === batchId ? { ...b, status, reviewNotes: notes } : b));
-        if (selectedBatch?.id === batchId) {
-            if (status === 'verified' || status === 'rejected') {
-                handleCloseModal();
-            } else {
-                setSelectedBatch({ ...selectedBatch, status, reviewNotes: notes });
-            }
-        }
+    const updateBatchStatus = async (batchId, status, notes = '', updateGroup = false) => {
+        const targetBatch = batches.find(b => b.id === batchId) || selectedBatch;
+        const targetGroupBatches = (updateGroup && targetBatch?.operatorId) 
+            ? batches.filter(b => b.operatorId === targetBatch.operatorId && b.status === 'pending')
+            : [targetBatch];
 
         try {
-            await updateDoc(doc(db, 'batches', batchId), { status, reviewNotes: notes });
+            for (const b of targetGroupBatches) {
+                if (b && b.id) {
+                    await updateDoc(doc(db, 'batches', b.id), { status, reviewNotes: notes });
+                }
+            }
+            if (selectedBatch) handleCloseModal();
             fetchBatches();
         } catch (err) {
             console.error("Error updating batch status:", err);
-            // Revert optimism on failure
             fetchBatches();
         }
     };
@@ -643,6 +660,35 @@ export default function AdminDashboard() {
     const historyEndIndex = Math.min(historyStartIndex + historyItemsPerPage, totalHistoryCount);
     const paginatedHistory = allFilteredHistory.slice(historyStartIndex, historyEndIndex);
 
+    const getPendingBatchGroups = () => {
+        const pendingBatches = batches.filter(b => b.status === 'pending');
+        const groupsMap = {};
+
+        pendingBatches.forEach(batch => {
+            const gKey = batch.groupId || batch.id;
+            if (!groupsMap[gKey]) {
+                groupsMap[gKey] = {
+                    groupId: gKey,
+                    operatorId: batch.operatorId,
+                    latestDate: batch.date || batch.createdAt,
+                    batches: [],
+                    totalExpectedBoots: 0,
+                    totalAmount: 0
+                };
+            }
+            groupsMap[gKey].batches.push(batch);
+            groupsMap[gKey].totalExpectedBoots += Number(batch.expectedItemCount || 0);
+            groupsMap[gKey].totalAmount += getNetPay(batch);
+        });
+
+        return Object.values(groupsMap);
+    };
+
+    const pendingBatchGroups = getPendingBatchGroups();
+    const operatorSubmittedBatches = activeGroupBatches.length > 0
+        ? activeGroupBatches
+        : (selectedBatch ? batches.filter(b => b.operatorId === selectedBatch.operatorId && b.status === 'pending') : []);
+
     return (
         <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
@@ -726,7 +772,7 @@ export default function AdminDashboard() {
                 <h3>Pending Batches (Requires Review)</h3>
                 {loading ? <div className="mt-4"><div className="spinner"></div></div> : (
                     <div className="flex flex-col gap-2 mt-4">
-                        {batches.filter(b => b.status === 'pending').length === 0 ? (
+                        {pendingBatchGroups.length === 0 ? (
                             <p className="text-center" style={{ color: 'var(--text-secondary)' }}>No pending batches.</p>
                         ) : (
                             <>
@@ -740,28 +786,38 @@ export default function AdminDashboard() {
                                     <div style={{ flex: 1, textAlign: 'right' }}>Actions</div>
                                 </div>
                                 {/* Body */}
-                                {batches.filter(b => b.status === 'pending').map(batch => (
-                                    <div key={batch.id} className="glass-card flex justify-between items-center flex-stack-mobile" style={{ padding: '1rem', boxShadow: 'none', backgroundColor: 'var(--bg-primary)', gap: '1rem' }}>
-                                        <div data-label="Operator" style={{ flex: 2, minWidth: '150px', fontWeight: 600 }}>
-                                            {formatOperatorName(batch.operatorId)}
+                                {pendingBatchGroups.map(group => {
+                                    const primaryBatch = group.batches[0];
+                                    const isMultiTicket = group.batches.length > 1;
+                                    return (
+                                        <div key={group.groupId} className="glass-card flex justify-between items-center flex-stack-mobile" style={{ padding: '1rem', boxShadow: 'none', backgroundColor: 'var(--bg-primary)', gap: '1rem' }}>
+                                            <div data-label="Operator" style={{ flex: 2, minWidth: '150px', fontWeight: 600 }}>
+                                                {formatOperatorName(group.operatorId)}
+                                            </div>
+                                            <div data-label="Date" style={{ flex: 1, minWidth: '100px' }}>
+                                                {group.latestDate ? getSafeDate(group.latestDate).toLocaleDateString() : 'N/A'}
+                                            </div>
+                                            <div data-label="Items" style={{ flex: 1, minWidth: '120px' }}>
+                                                <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>
+                                                    {isMultiTicket ? `${group.batches.length} Tickets (${group.totalExpectedBoots} boots)` : `${group.totalExpectedBoots} boots`}
+                                                </span>
+                                            </div>
+                                            <div data-label="Amount" style={{ flex: 1, minWidth: '100px', textAlign: 'right', fontWeight: 600 }}>
+                                                ${group.totalAmount.toFixed(2)}
+                                            </div>
+                                            <div data-label="Status" style={{ flex: 1, minWidth: '100px', display: 'flex', justifyContent: 'center' }}>
+                                                <span className="badge badge-pending">
+                                                    {isMultiTicket ? 'Pending Group' : 'Pending'}
+                                                </span>
+                                            </div>
+                                            <div data-label="Actions" style={{ flex: 1, minWidth: '100px', display: 'flex', justifyContent: 'flex-end' }}>
+                                                <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(primaryBatch, group.batches)}>
+                                                    Review {isMultiTicket ? 'Group' : 'Ticket'}
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div data-label="Date" style={{ flex: 1, minWidth: '100px' }}>
-                                            {batch.date ? getSafeDate(batch.date).toLocaleDateString() : 'N/A'}
-                                        </div>
-                                        <div data-label="Items" style={{ flex: 1, minWidth: '80px' }}>
-                                            <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>{batch.expectedItemCount} boots</span>
-                                        </div>
-                                        <div data-label="Amount" style={{ flex: 1, minWidth: '100px', textAlign: 'right', fontWeight: 600 }}>
-                                            ${getNetPay(batch).toFixed(2)}
-                                        </div>
-                                        <div data-label="Status" style={{ flex: 1, minWidth: '100px', display: 'flex', justifyContent: 'center' }}>
-                                            <span className="badge badge-pending">Pending</span>
-                                        </div>
-                                        <div data-label="Actions" style={{ flex: 1, minWidth: '100px', display: 'flex', justifyContent: 'flex-end' }}>
-                                            <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }} onClick={() => handleViewDocs(batch)}>Review</button>
-                                        </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </>
                         )}
                     </div>
@@ -1265,39 +1321,99 @@ export default function AdminDashboard() {
             {/* Review Modal */}
             {selectedBatch && (
                 <div className="modal-overlay">
-                    <div className="modal-content glass-card">
+                    <div className="modal-content glass-card" style={{ maxWidth: '850px' }}>
                         <button className="modal-close" onClick={handleCloseModal}>X</button>
-                        <h3 className="mb-4">Review Batch</h3>
-
-                        <div className="flex gap-4 flex-responsive">
-                            <div style={{ flex: 1 }}>
-                                <h4 className="mb-2">Daily Summary Ticket</h4>
-                                <img src={selectedBatch.batchTicketUrl} alt="Batch Ticket" style={{ width: '100%', borderRadius: '0.5rem' }} />
+                        
+                        <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
+                            <div>
+                                <h3 style={{ margin: 0 }}>Review Batch Ticket</h3>
+                                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.84375rem', color: 'var(--text-secondary)' }}>
+                                    Operator: <strong>{formatOperatorName(selectedBatch.operatorId)}</strong>
+                                </p>
                             </div>
-                            <div style={{ flex: 1, maxHeight: '60vh', overflowY: 'auto' }}>
-                                <h4 className="mb-2">Transactions ({txDetails.length})</h4>
-                                {txDetails.map((tx, idx) => (
-                                    <div key={idx} className="glass-card mb-2" style={{ padding: '1rem' }}>
-                                        <div className="flex justify-between mb-2">
-                                            <div>{tx.licensePlate}</div>
-                                            <div>${tx.amountPaid} (*{tx.cardLast4})</div>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            {Array.isArray(tx.photos) ? tx.photos.map((url, pIdx) => (
-                                                <a key={pIdx} href={url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Photo {pIdx + 1}</a>
-                                            )) : tx.photos && (
-                                                <>
-                                                    {tx.photos.vehicle && (Array.isArray(tx.photos.vehicle)
-                                                        ? tx.photos.vehicle.map((vUrl, vIdx) => <a key={`v${vIdx}`} href={vUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Vehicle {vIdx + 1}</a>)
-                                                        : <a href={tx.photos.vehicle} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Vehicle</a>
-                                                    )}
-                                                    {tx.photos.receipt && <a href={tx.photos.receipt} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Receipt</a>}
-                                                    {tx.photos.release && <a href={tx.photos.release} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>Release</a>}
-                                                </>
-                                            )}
-                                        </div>
+                            <div className="flex items-center gap-2">
+                                <span className={`badge badge-${selectedBatch.status}`}>
+                                    {selectedBatch.status}
+                                </span>
+                                <span className="badge" style={{ backgroundColor: 'var(--md-sys-color-primary-container)', color: 'var(--md-sys-color-on-primary-container)' }}>
+                                    Expected: {selectedBatch.expectedItemCount} boots
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Multi-Ticket Navigation Selector for pending submitted tickets */}
+                        {operatorSubmittedBatches.length > 1 && (
+                            <div className="mb-4 p-3" style={{ backgroundColor: 'var(--md-sys-color-surface-variant)', borderRadius: 'var(--md-sys-shape-corner-medium)', border: '1px solid var(--md-sys-color-outline-variant)' }}>
+                                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                    Pending Submissions for {formatOperatorName(selectedBatch.operatorId)} ({operatorSubmittedBatches.length} pending tickets):
+                                </div>
+                                <div className="flex gap-2 flex-wrap">
+                                    {operatorSubmittedBatches.map((bItem, idx) => (
+                                        <button
+                                            key={bItem.id}
+                                            type="button"
+                                            onClick={() => handleViewDocs(bItem)}
+                                            className={`btn btn-sm ${bItem.id === selectedBatch.id ? 'btn-primary' : 'btn-secondary'}`}
+                                            style={{ fontSize: '0.8125rem' }}
+                                        >
+                                            Pending Ticket #{idx + 1} ({bItem.expectedItemCount} boots)
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                            <div className="flex gap-4 flex-responsive">
+                                <div style={{ flex: 1 }}>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h4 style={{ margin: 0 }}>Daily Summary Ticket</h4>
+                                        {selectedBatch.batchTicketUrl && (
+                                            <a href={selectedBatch.batchTicketUrl} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm" style={{ fontSize: '0.75rem' }}>
+                                                Open Image
+                                            </a>
+                                        )}
                                     </div>
-                                ))}
+                                    {selectedBatch.batchTicketUrl ? (
+                                        <img src={selectedBatch.batchTicketUrl} alt="Batch Ticket" style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', borderRadius: '0.5rem', border: '1px solid var(--glass-border)', backgroundColor: '#000' }} />
+                                    ) : (
+                                        <div className="p-6 text-center" style={{ backgroundColor: 'var(--md-sys-color-surface-variant)', borderRadius: '0.5rem', color: 'var(--text-secondary)' }}>
+                                            No daily summary ticket photo attached.
+                                        </div>
+                                    )}
+                                </div>
+                                <div style={{ flex: 1, maxHeight: '65vh', overflowY: 'auto' }}>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h4 style={{ margin: 0 }}>Transactions ({txDetails.length})</h4>
+                                    </div>
+                                    {txDetails.length === 0 ? (
+                                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>No vehicle transactions added yet.</p>
+                                    ) : (
+                                        txDetails.map((tx, idx) => (
+                                            <div key={idx} className="glass-card mb-2" style={{ padding: '0.875rem' }}>
+                                                <div className="flex justify-between items-start mb-1">
+                                                    <div style={{ fontWeight: 600 }}>{tx.licensePlate || 'No Plate'}</div>
+                                                    <div style={{ fontWeight: 600 }}>${tx.amountPaid} (*{tx.cardLast4})</div>
+                                                </div>
+                                                <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                                                    {tx.vehicleDescription || 'No description'}
+                                                </div>
+                                                <div className="flex gap-2 flex-wrap">
+                                                    {Array.isArray(tx.photos) ? tx.photos.map((url, pIdx) => (
+                                                        <a key={pIdx} href={url} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm" style={{ fontSize: '0.75rem', height: '28px', padding: '0 0.5rem' }}>Photo {pIdx + 1}</a>
+                                                    )) : tx.photos && (
+                                                        <>
+                                                            {tx.photos.vehicle && (Array.isArray(tx.photos.vehicle)
+                                                                ? tx.photos.vehicle.map((vUrl, vIdx) => <a key={`v${vIdx}`} href={vUrl} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm" style={{ fontSize: '0.75rem', height: '28px', padding: '0 0.5rem' }}>Vehicle {vIdx + 1}</a>)
+                                                                : <a href={tx.photos.vehicle} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm" style={{ fontSize: '0.75rem', height: '28px', padding: '0 0.5rem' }}>Vehicle</a>
+                                                            )}
+                                                            {tx.photos.receipt && <a href={tx.photos.receipt} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm" style={{ fontSize: '0.75rem', height: '28px', padding: '0 0.5rem' }}>Receipt</a>}
+                                                            {tx.photos.release && <a href={tx.photos.release} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm" style={{ fontSize: '0.75rem', height: '28px', padding: '0 0.5rem' }}>Release</a>}
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
 
                                 <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--glass-border)' }}>
                                     <div className="flex justify-between items-center mb-3">
@@ -1480,16 +1596,41 @@ export default function AdminDashboard() {
                                 </div>
                             )}
 
-                            <div className="flex justify-end gap-4">
+                            <div className="flex justify-end gap-3 flex-wrap">
                                 <button className="btn btn-secondary" onClick={handleCloseModal}>Cancel</button>
                                 {selectedBatch.status === 'pending' && (
                                     <>
-                                        <button className="btn btn-secondary" style={{ color: 'var(--status-error)', borderColor: 'var(--status-error)' }} onClick={() => updateBatchStatus(selectedBatch.id, 'rejected', reviewNotes)}>
-                                            Reject Batch
+                                        <button
+                                            className="btn btn-secondary"
+                                            style={{ color: 'var(--status-error)', borderColor: 'var(--status-error)' }}
+                                            onClick={() => updateBatchStatus(selectedBatch.id, 'rejected', reviewNotes, false)}
+                                        >
+                                            Reject Ticket
                                         </button>
-                                        <button className="btn btn-primary" onClick={() => updateBatchStatus(selectedBatch.id, 'verified', reviewNotes)}>
-                                            Verify Batch
+                                        {operatorSubmittedBatches.length > 1 && (
+                                            <button
+                                                className="btn btn-secondary"
+                                                style={{ color: 'var(--status-error)', borderColor: 'var(--status-error)' }}
+                                                onClick={() => updateBatchStatus(selectedBatch.id, 'rejected', reviewNotes, true)}
+                                            >
+                                                Reject Entire Group ({operatorSubmittedBatches.length})
+                                            </button>
+                                        )}
+                                        <button
+                                            className="btn btn-primary"
+                                            onClick={() => updateBatchStatus(selectedBatch.id, 'verified', reviewNotes, false)}
+                                        >
+                                            Verify Ticket
                                         </button>
+                                        {operatorSubmittedBatches.length > 1 && (
+                                            <button
+                                                className="btn btn-primary"
+                                                style={{ backgroundColor: 'var(--status-paid)', borderColor: 'var(--status-paid)' }}
+                                                onClick={() => updateBatchStatus(selectedBatch.id, 'verified', reviewNotes, true)}
+                                            >
+                                                Verify Entire Group ({operatorSubmittedBatches.length})
+                                            </button>
+                                        )}
                                     </>
                                 )}
                             </div>

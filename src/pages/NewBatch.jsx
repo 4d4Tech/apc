@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
@@ -14,6 +14,8 @@ export default function NewBatch() {
   const [entryMode, setEntryMode] = useState('manual'); // 'manual' or 'ai'
   const [manualItemCount, setManualItemCount] = useState('');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const existingGroupId = searchParams.get('groupId');
   const { userData } = useAuth();
 
   const handleFileChange = (e) => {
@@ -79,18 +81,19 @@ export default function NewBatch() {
 
     setUploading(true);
     try {
+      const activeGroupId = existingGroupId || `group_${Date.now()}_${auth.currentUser.uid.slice(0, 6)}`;
       const batchRef = await addDoc(collection(db, 'batches'), {
         operatorId: auth.currentUser.uid,
+        groupId: activeGroupId,
         date: serverTimestamp(),
         createdAt: new Date().toISOString(),
-        status: 'draft', // Optional for manual
-        batchTicketUrl: finalTicketUrl || null, // Optional for manual
+        status: 'draft',
+        batchTicketUrl: finalTicketUrl || null,
         batchTotalAmount: finalData.batchTotalAmount,
         expectedItemCount: finalData.expectedItemCount,
         calculatedPay: finalData.expectedItemCount * (userData?.ratePerBoot || 0)
       });
       setUploading(false);
-      // Redirect to transaction form/details page for this batch (To be created)
       navigate(`/operator/batch/${batchRef.id}`);
     } catch (err) {
       console.error("Error creating batch:", err);
