@@ -268,17 +268,45 @@ export default function BatchDetails() {
   };
 
   const handleCancelBatch = async () => {
-    if (!window.confirm("Are you sure you want to completely delete this batch? All transactions and progress will be lost.")) return;
-    try {
-      for (const tx of transactions) {
-        await deleteDoc(doc(db, `batches/${batchId}/transactions`, tx.id));
+    let targetBatches = groupBatches.length > 0 ? groupBatches : [batch];
+
+    if (targetBatches.length <= 1 && batch?.groupId && auth.currentUser) {
+      try {
+        const q = query(
+          collection(db, 'batches'),
+          where('operatorId', '==', auth.currentUser.uid),
+          where('groupId', '==', batch.groupId)
+        );
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          targetBatches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        }
+      } catch (err) {
+        console.error("Error finding sister group batches:", err);
       }
-      await deleteDoc(doc(db, 'batches', batchId));
-      alert("Batch cancelled and deleted.");
+    }
+
+    const count = targetBatches.length;
+    const confirmMessage = count > 1
+      ? `Are you sure you want to completely delete this entire batch group (${count} tickets)? All transactions and progress for all tickets in this group will be lost.`
+      : "Are you sure you want to completely delete this batch? All transactions and progress will be lost.";
+
+    if (!window.confirm(confirmMessage)) return;
+
+    try {
+      for (const bDoc of targetBatches) {
+        if (!bDoc || !bDoc.id) continue;
+        const txSnap = await getDocs(collection(db, `batches/${bDoc.id}/transactions`));
+        for (const txDoc of txSnap.docs) {
+          await deleteDoc(doc(db, `batches/${bDoc.id}/transactions`, txDoc.id));
+        }
+        await deleteDoc(doc(db, 'batches', bDoc.id));
+      }
+      alert(count > 1 ? "Batch group cancelled and deleted." : "Batch cancelled and deleted.");
       navigate('/operator');
     } catch (err) {
-      console.error("Error cancelling batch", err);
-      alert("Failed to cancel batch.");
+      console.error("Error cancelling batch group:", err);
+      alert("Failed to cancel batch group.");
     }
   };
 
@@ -609,7 +637,7 @@ export default function BatchDetails() {
             style={{ width: '100%', color: 'var(--status-error)', borderColor: 'rgba(239, 68, 68, 0.2)', marginTop: '0.5rem' }}
             onClick={handleCancelBatch}
           >
-            Cancel & Delete Entire Batch
+            Cancel & Delete Entire Batch{groupBatches.length > 1 ? ' Group' : ''}
           </button>
         </div>
       )}

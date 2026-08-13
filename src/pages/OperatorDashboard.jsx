@@ -222,7 +222,32 @@ export default function OperatorDashboard() {
       });
     }
 
-    filtered.sort((a, b) => {
+    // Group history batches by groupId
+    const groupsMap = {};
+    filtered.forEach(b => {
+      const gKey = b.groupId || b.id;
+      if (!groupsMap[gKey]) {
+        groupsMap[gKey] = {
+          id: b.id,
+          groupId: gKey,
+          status: b.status,
+          date: b.date,
+          createdAt: b.createdAt,
+          paidAt: b.paidAt,
+          reviewNotes: b.reviewNotes,
+          batches: [],
+          totalExpectedBoots: 0,
+          totalPayout: 0
+        };
+      }
+      groupsMap[gKey].batches.push(b);
+      groupsMap[gKey].totalExpectedBoots += Number(b.expectedItemCount || 0);
+      groupsMap[gKey].totalPayout += getBatchPayout(b);
+    });
+
+    const groupedResult = Object.values(groupsMap);
+
+    groupedResult.sort((a, b) => {
       const dtA = getBatchDateObj(a);
       const dtB = getBatchDateObj(b);
       const timeA = dtA ? dtA.getTime() : 0;
@@ -230,7 +255,7 @@ export default function OperatorDashboard() {
       return timeB - timeA;
     });
 
-    return filtered;
+    return groupedResult;
   };
 
   const totalBoots = batches.reduce((acc, batch) => acc + (batch.expectedItemCount || 0), 0);
@@ -639,16 +664,18 @@ export default function OperatorDashboard() {
               <p className="text-center py-4" style={{ color: 'var(--text-secondary)' }}>No matching batches found.</p>
             ) : (
               <>
-                {paginatedHistory.map(batch => {
-                  const effectiveStatus = batch.status === 'archived' ? 'paid' : batch.status;
+                {paginatedHistory.map(group => {
+                  const primaryBatch = group.batches[0];
+                  const isMultiTicket = group.batches.length > 1;
+                  const effectiveStatus = group.status === 'archived' ? 'paid' : group.status;
                   return (
-                    <div key={batch.id} className="glass-card flex justify-between items-center flex-stack-mobile" style={{ padding: '1rem', backgroundColor: 'var(--bg-primary)', boxShadow: 'none', gap: '1rem' }}>
+                    <div key={group.groupId} className="glass-card flex justify-between items-center flex-stack-mobile" style={{ padding: '1rem', backgroundColor: 'var(--bg-primary)', boxShadow: 'none', gap: '1rem' }}>
                       <div style={{ flex: 1, minWidth: '160px' }}>
                         <div style={{ fontWeight: 500, fontSize: '0.9375rem' }}>
-                          {formatBatchDate(batch)}
+                          {formatBatchDate(primaryBatch)}
                         </div>
                         <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                          {batch.expectedItemCount} boots
+                          {isMultiTicket ? `${group.batches.length} Tickets (${group.totalExpectedBoots} boots)` : `${group.totalExpectedBoots} boots`}
                         </div>
                       </div>
 
@@ -656,28 +683,26 @@ export default function OperatorDashboard() {
                         <span className={`badge badge-${effectiveStatus}`}>
                           {effectiveStatus}
                         </span>
-                        {batch.reviewNotes && (
+                        {group.reviewNotes && (
                           <MessageSquare
                             size={16}
                             style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
-                            title={batch.reviewNotes}
-                            onClick={() => alert(`Admin Note:\n\n${batch.reviewNotes}`)}
+                            title={group.reviewNotes}
+                            onClick={() => alert(`Admin Note:\n\n${group.reviewNotes}`)}
                           />
                         )}
-                        {(batch.status === 'rejected' || batch.status === 'draft') && (
-                          <button
-                            className="btn btn-secondary"
-                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                            onClick={() => navigate(`/operator/batch/${batch.id}`)}
-                          >
-                            {batch.status === 'draft' ? 'Resume Draft' : 'Fix & Resubmit'}
-                          </button>
-                        )}
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                          onClick={() => navigate(`/operator/batch/${primaryBatch.id}`)}
+                        >
+                          {group.status === 'draft' ? 'Resume Draft' : (group.status === 'rejected' ? 'Fix & Resubmit' : 'View Group')}
+                        </button>
                       </div>
 
                       <div style={{ flex: 1, textAlign: 'right', minWidth: '100px' }}>
                         <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>
-                          {['paid', 'processing', 'archived', 'verified'].includes(batch.status) ? `$${getBatchPayout(batch).toFixed(2)}` : '--'}
+                          {['paid', 'processing', 'archived', 'verified'].includes(group.status) ? `$${group.totalPayout.toFixed(2)}` : '--'}
                         </span>
                       </div>
                     </div>

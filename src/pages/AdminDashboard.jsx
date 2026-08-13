@@ -245,9 +245,19 @@ export default function AdminDashboard() {
 
     const updateBatchStatus = async (batchId, status, notes = '', updateGroup = false) => {
         const targetBatch = batches.find(b => b.id === batchId) || selectedBatch;
-        const targetGroupBatches = (updateGroup && targetBatch?.operatorId) 
-            ? batches.filter(b => b.operatorId === targetBatch.operatorId && b.status === 'pending')
-            : [targetBatch];
+        if (!targetBatch) return;
+
+        let targetGroupBatches = [targetBatch];
+
+        if (updateGroup) {
+            if (activeGroupBatches && activeGroupBatches.length > 0) {
+                targetGroupBatches = activeGroupBatches.filter(b => b.status === 'pending');
+            } else if (targetBatch.groupId) {
+                targetGroupBatches = batches.filter(b => b.groupId === targetBatch.groupId && b.status === 'pending');
+            } else {
+                targetGroupBatches = [targetBatch];
+            }
+        }
 
         try {
             for (const b of targetGroupBatches) {
@@ -260,6 +270,19 @@ export default function AdminDashboard() {
         } catch (err) {
             console.error("Error updating batch status:", err);
             fetchBatches();
+        }
+    };
+
+    const handleArchiveGroup = async (groupBatches) => {
+        if (!window.confirm(`Are you sure you want to archive this batch group (${groupBatches.length} ticket(s))?`)) return;
+        try {
+            for (const b of groupBatches) {
+                await updateDoc(doc(db, 'batches', b.id), { status: 'archived' });
+            }
+            fetchBatches();
+        } catch (err) {
+            console.error("Error archiving batch group:", err);
+            alert("Failed to archive batch group.");
         }
     };
 
@@ -634,7 +657,33 @@ export default function AdminDashboard() {
             });
         }
 
-        filtered.sort((a, b) => {
+        // Group history batches by groupId
+        const groupsMap = {};
+        filtered.forEach(b => {
+            const gKey = b.groupId || b.id;
+            if (!groupsMap[gKey]) {
+                groupsMap[gKey] = {
+                    id: b.id,
+                    groupId: gKey,
+                    operatorId: b.operatorId,
+                    status: b.status,
+                    date: b.date,
+                    createdAt: b.createdAt,
+                    paidAt: b.paidAt,
+                    reviewNotes: b.reviewNotes,
+                    batches: [],
+                    totalExpectedBoots: 0,
+                    totalNetPay: 0
+                };
+            }
+            groupsMap[gKey].batches.push(b);
+            groupsMap[gKey].totalExpectedBoots += Number(b.expectedItemCount || 0);
+            groupsMap[gKey].totalNetPay += getNetPay(b);
+        });
+
+        const groupedResult = Object.values(groupsMap);
+
+        groupedResult.sort((a, b) => {
             const dtA = getBatchDateObj(a);
             const dtB = getBatchDateObj(b);
             const timeA = dtA ? dtA.getTime() : 0;
@@ -642,7 +691,7 @@ export default function AdminDashboard() {
             return timeB - timeA;
         });
 
-        return filtered;
+        return groupedResult;
     };
 
     const pendingPayoutTotal = batches.filter(b => b.status === 'verified').reduce((sum, b) => sum + getNetPay(b), 0);
@@ -1165,107 +1214,113 @@ export default function AdminDashboard() {
                                     <div style={{ flex: 1, textAlign: 'right' }}>Payout</div>
                                     <div style={{ flex: 1, textAlign: 'center' }}>Documents</div>
                                 </div>
-                                {/* Body */}
-                                {paginatedHistory.map(batch => (
-                                    <React.Fragment key={batch.id}>
-                                        {/* Desktop Row */}
-                                        <div className="glass-card flex justify-between items-center hide-on-mobile" style={{ padding: '1rem', boxShadow: 'none', backgroundColor: 'var(--bg-primary)', gap: '1rem', marginBottom: '1rem' }}>
-                                            <div style={{ flex: 2, minWidth: '150px', fontWeight: 600 }}>
-                                                {formatOperatorName(batch.operatorId)}
-                                            </div>
-                                            <div style={{ flex: 1, minWidth: '130px' }}>
-                                                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                    <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>{formatBatchDate(batch)}</span>
-                                                    {batch.paidAt && (
-                                                        <span style={{ fontSize: '0.75rem', color: 'var(--status-paid)', fontWeight: 600 }}>
-                                                            Paid {getSafeDate(batch.paidAt) ? getSafeDate(batch.paidAt).toLocaleDateString() : ''}
+                                 {/* Body */}
+                                {paginatedHistory.map(group => {
+                                    const primaryBatch = group.batches[0];
+                                    const isMultiTicket = group.batches.length > 1;
+                                    return (
+                                        <React.Fragment key={group.groupId}>
+                                            {/* Desktop Row */}
+                                            <div className="glass-card flex justify-between items-center hide-on-mobile" style={{ padding: '1rem', boxShadow: 'none', backgroundColor: 'var(--bg-primary)', gap: '1rem', marginBottom: '1rem' }}>
+                                                <div style={{ flex: 2, minWidth: '150px', fontWeight: 600 }}>
+                                                    {formatOperatorName(group.operatorId)}
+                                                </div>
+                                                <div style={{ flex: 1, minWidth: '130px' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                        <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>{formatBatchDate(primaryBatch)}</span>
+                                                        {group.paidAt && (
+                                                            <span style={{ fontSize: '0.75rem', color: 'var(--status-paid)', fontWeight: 600 }}>
+                                                                Paid {getSafeDate(group.paidAt) ? getSafeDate(group.paidAt).toLocaleDateString() : ''}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div style={{ flex: 1, minWidth: '100px', display: 'flex', justifyContent: 'center' }}>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`badge badge-${group.status}`}>
+                                                            {group.status}
                                                         </span>
-                                                    )}
+                                                        {isMultiTicket && (
+                                                            <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)', fontSize: '0.75rem' }}>
+                                                                {group.batches.length} Tickets
+                                                            </span>
+                                                        )}
+                                                        {group.reviewNotes && (
+                                                            <MessageSquare
+                                                                size={16}
+                                                                style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
+                                                                title={group.reviewNotes}
+                                                                onClick={() => alert(`Review Note:\n\n${group.reviewNotes}`)}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div style={{ flex: 1, minWidth: '100px', textAlign: 'right', fontWeight: 600 }}>
+                                                    ${group.totalNetPay.toFixed(2)}
+                                                </div>
+                                                <div style={{ flex: 1, minWidth: '120px', display: 'flex', justifyContent: 'center' }}>
+                                                    <div className="flex gap-2" style={{ justifyContent: 'center' }}>
+                                                        {(group.status === 'paid' || group.status === 'processing') && (
+                                                            <button className="btn btn-secondary btn-icon" disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(primaryBatch.id)} title="Download PDF Stub">
+                                                                <Download size={18} />
+                                                            </button>
+                                                        )}
+                                                        <button className="btn btn-secondary btn-icon" onClick={() => handleViewDocs(primaryBatch, group.batches)} title="View Documents">
+                                                            <Images size={18} />
+                                                        </button>
+                                                        <button className="btn btn-secondary btn-icon" style={{ color: 'var(--status-error)' }} title="Archive Batch Group" onClick={() => handleArchiveGroup(group.batches)}>
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div style={{ flex: 1, minWidth: '100px', display: 'flex', justifyContent: 'center' }}>
-                                                <div className="flex items-center gap-2">
-                                                    <span className={`badge badge-${batch.status}`}>
-                                                        {batch.status}
-                                                    </span>
-                                                    {batch.reviewNotes && (
-                                                        <MessageSquare
-                                                            size={16}
-                                                            style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
-                                                            title={batch.reviewNotes}
-                                                            onClick={() => alert(`Review Note:\n\n${batch.reviewNotes}`)}
-                                                        />
-                                                    )}
+
+                                            {/* Mobile Card */}
+                                            <div className="glass-card mobile-only" style={{ padding: '1rem', boxShadow: 'none', backgroundColor: 'var(--bg-primary)', marginBottom: '1rem' }}>
+                                                <div className="flex justify-between items-start" style={{ marginBottom: '1rem' }}>
+                                                    <div className="flex items-start gap-2">
+                                                        <User size={16} style={{ color: 'var(--text-secondary)', marginTop: '4px' }} />
+                                                        <div>
+                                                            <div style={{ fontWeight: 600, fontSize: '1rem' }}>{formatOperatorName(group.operatorId)}</div>
+                                                            <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
+                                                                <Calendar size={12} /> {formatBatchDate(primaryBatch)}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`badge badge-${group.status}`}>
+                                                            {group.status}
+                                                        </span>
+                                                        {isMultiTicket && (
+                                                            <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.1)', fontSize: '0.75rem' }}>
+                                                                {group.batches.length} Tickets
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <div style={{ flex: 1, minWidth: '100px', textAlign: 'right', fontWeight: 600 }}>
-                                                ${getNetPay(batch).toFixed(2)}
-                                            </div>
-                                            <div style={{ flex: 1, minWidth: '120px', display: 'flex', justifyContent: 'center' }}>
-                                                <div className="flex gap-2" style={{ justifyContent: 'center' }}>
-                                                    {(batch.status === 'paid' || batch.status === 'processing') && (
-                                                        <button className="btn btn-secondary btn-icon" disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)} title="Download PDF Stub">
+
+                                                <div style={{ textAlign: 'center', margin: '1.5rem 0' }}>
+                                                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>${group.totalNetPay.toFixed(2)}</div>
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>Payout Amount</div>
+                                                </div>
+
+                                                <div className="flex justify-center gap-3" style={{ paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                                                    {(group.status === 'paid' || group.status === 'processing') && (
+                                                        <button className="btn btn-secondary btn-icon" disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(primaryBatch.id)} title="Download PDF Stub">
                                                             <Download size={18} />
                                                         </button>
                                                     )}
-                                                    <button className="btn btn-secondary btn-icon" onClick={() => handleViewDocs(batch)} title="View Documents">
+                                                    <button className="btn btn-secondary btn-icon" onClick={() => handleViewDocs(primaryBatch, group.batches)} title="View Documents">
                                                         <Images size={18} />
                                                     </button>
-                                                    <button className="btn btn-secondary btn-icon" style={{ color: 'var(--status-error)' }} title="Archive Batch" onClick={() => handleArchiveBatch(batch.id)}>
+                                                    <button className="btn btn-secondary btn-icon" style={{ color: 'var(--status-error)' }} title="Archive Batch Group" onClick={() => handleArchiveGroup(group.batches)}>
                                                         <Trash2 size={18} />
                                                     </button>
                                                 </div>
                                             </div>
-                                        </div>
-
-                                        {/* Mobile Card */}
-                                        <div className="glass-card mobile-only" style={{ padding: '1rem', boxShadow: 'none', backgroundColor: 'var(--bg-primary)', marginBottom: '1rem' }}>
-                                            <div className="flex justify-between items-start" style={{ marginBottom: '1rem' }}>
-                                                <div className="flex items-start gap-2">
-                                                    <User size={16} style={{ color: 'var(--text-secondary)', marginTop: '4px' }} />
-                                                    <div>
-                                                        <div style={{ fontWeight: 600, fontSize: '1rem' }}>{formatOperatorName(batch.operatorId)}</div>
-                                                        <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
-                                                            <Calendar size={12} /> {formatBatchDate(batch)}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className={`badge badge-${batch.status}`}>
-                                                        {batch.status}
-                                                    </span>
-                                                    {batch.reviewNotes && (
-                                                        <MessageSquare
-                                                            size={16}
-                                                            style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
-                                                            title={batch.reviewNotes}
-                                                            onClick={() => alert(`Review Note:\n\n${batch.reviewNotes}`)}
-                                                        />
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div style={{ textAlign: 'center', margin: '1.5rem 0' }}>
-                                                <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>${getNetPay(batch).toFixed(2)}</div>
-                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>Payout Amount</div>
-                                            </div>
-
-                                            <div className="flex justify-center gap-3" style={{ paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-                                                {(batch.status === 'paid' || batch.status === 'processing') && (
-                                                    <button className="btn btn-secondary btn-icon" disabled={isDownloadingPaystub} onClick={() => handleDownloadPaystub(batch.id)} title="Download PDF Stub">
-                                                        <Download size={18} />
-                                                    </button>
-                                                )}
-                                                <button className="btn btn-secondary btn-icon" onClick={() => handleViewDocs(batch)} title="View Documents">
-                                                    <Images size={18} />
-                                                </button>
-                                                <button className="btn btn-secondary btn-icon" style={{ color: 'var(--status-error)' }} title="Archive Batch" onClick={() => handleArchiveBatch(batch.id)}>
-                                                    <Trash2 size={18} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </React.Fragment>
-                                ))}
+                                        </React.Fragment>
+                                    );
+                                })}
 
                                 {/* Batch History Pagination Footer */}
                                 {totalHistoryPages > 1 && (
